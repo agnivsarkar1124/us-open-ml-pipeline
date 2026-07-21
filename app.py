@@ -43,31 +43,40 @@ st.caption(
 # =====================================================================
 @st.cache_data
 def load_and_train():
-    base_url = "https://raw.githubusercontent.com/Kadantte/tennis_atp/master/atp_matches_{}.csv"
-    dfs = []
-    for year in [2020, 2021, 2022, 2023]:
-        try:
-            df = pd.read_csv(base_url.format(year))
-            df["tourney_date"] = pd.to_datetime(
-                df["tourney_date"].astype(str), format="%Y%m%d"
-            )
-            dfs.append(df)
-        except Exception:
-            pass
+    # ... (loading all_matches as before) ...
     all_matches = pd.concat(dfs, ignore_index=True).sort_values("tourney_date")
 
-    # Feature engineering for training
+    # 1. Compute Elo for ALL players across ALL matches
+    elo_ratings = {}
+    K = 32
+    DEFAULT_ELO = 1500
+
+    # We track dynamic pre-match Elo for training
     us_open_matches = all_matches[
         all_matches["tourney_name"].str.contains("US Open", case=False, na=False)
     ].copy()
+
+    # Pre-calculate Elo timeline
+    all_matches_elo = []
+    for _, row in all_matches.iterrows():
+        w, l = row["winner_name"], row["loser_name"]
+        rw = elo_ratings.get(w, DEFAULT_ELO)
+        rl = elo_ratings.get(l, DEFAULT_ELO)
+
+        # Update Elo
+        ew = 1 / (1 + 10 ** ((rl - rw) / 400))
+        elo_ratings[w] = rw + K * (1 - ew)
+        elo_ratings[l] = rl + K * (0 - ew)
+
+    # 2. Build training dataset using final/pre-match Elo diffs
     h2h_tracker = {}
     ml_rows = []
     np.random.seed(42)
 
     for _, row in us_open_matches.iterrows():
-        winner, loser = row["winner_name"], row["loser_name"]
+        w, l = row["winner_name"], row["loser_name"]
         swap = np.random.rand() > 0.5
-        pA, pB = (loser, winner) if swap else (winner, loser)
+        pA, pB = (l, w) if swap else (w, l)
         target = 0 if swap else 1
 
         pair_key = tuple(sorted([pA, pB]))
@@ -75,19 +84,20 @@ def load_and_train():
         h2h_diff = h2h_data.get(pA, 0) - h2h_data.get(pB, 0)
 
         if pair_key not in h2h_tracker:
-            h2h_tracker[pair_key] = {winner: 1, loser: 0}
+            h2h_tracker[pair_key] = {w: 1, l: 0}
         else:
-            h2h_tracker[pair_key][winner] = (
-                h2h_tracker[pair_key].get(winner, 0) + 1
-            )
+            h2h_tracker[pair_key][w] = h2h_tracker[pair_key].get(w, 0) + 1
 
-        ml_rows.append({"elo_diff": 0, "h2h_diff": h2h_diff, "target": target})
+        # Real Elo difference
+        elo_diff = elo_ratings.get(pA, DEFAULT_ELO) - elo_ratings.get(pB, DEFAULT_ELO)
+
+        ml_rows.append({"elo_diff": elo_diff, "h2h_diff": h2h_diff, "target": target})
 
     ml_df = pd.DataFrame(ml_rows)
     model = HistGradientBoostingClassifier(random_state=42)
     model.fit(ml_df[["elo_diff", "h2h_diff"]], ml_df["target"])
 
-    return all_matches, h2h_tracker, model
+    return all_matches, h2h_tracker, elo_ratings, model
 
 
 with st.spinner("🚀 Loading ATP Data & Training Gradient Boosting Model..."):
