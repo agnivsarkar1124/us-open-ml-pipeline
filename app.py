@@ -33,9 +33,7 @@ st.markdown(
 
 # Title Banner
 st.title("🎾 US Open Match Prediction & Weather Pipeline")
-st.caption(
-    "Recency-Weighted Elo + Atmospheric Court Weather + Gradient Boosting"
-)
+st.caption("Recency-Weighted Elo + Atmospheric Court Weather + Gradient Boosting")
 
 
 # =====================================================================
@@ -43,40 +41,49 @@ st.caption(
 # =====================================================================
 @st.cache_data
 def load_and_train():
-    # ... (loading all_matches as before) ...
+    base_url = (
+        "https://raw.githubusercontent.com/Kadantte/tennis_atp/master/atp_matches_{}.csv"
+    )
+    dfs = []
+    for year in [2020, 2021, 2022, 2023]:
+        try:
+            df = pd.read_csv(base_url.format(year))
+            df["tourney_date"] = pd.to_datetime(
+                df["tourney_date"].astype(str), format="%Y%m%d"
+            )
+            dfs.append(df)
+        except Exception:
+            pass
     all_matches = pd.concat(dfs, ignore_index=True).sort_values("tourney_date")
 
-    # 1. Compute Elo for ALL players across ALL matches
+    # 1. Compute dynamic Elo ratings across ALL matches against ALL players
     elo_ratings = {}
     K = 32
     DEFAULT_ELO = 1500
 
-    # We track dynamic pre-match Elo for training
-    us_open_matches = all_matches[
-        all_matches["tourney_name"].str.contains("US Open", case=False, na=False)
-    ].copy()
-
-    # Pre-calculate Elo timeline
-    all_matches_elo = []
     for _, row in all_matches.iterrows():
         w, l = row["winner_name"], row["loser_name"]
         rw = elo_ratings.get(w, DEFAULT_ELO)
         rl = elo_ratings.get(l, DEFAULT_ELO)
 
-        # Update Elo
-        ew = 1 / (1 + 10 ** ((rl - rw) / 400))
-        elo_ratings[w] = rw + K * (1 - ew)
-        elo_ratings[l] = rl + K * (0 - ew)
+        exp_w = 1 / (1 + 10 ** ((rl - rw) / 400))
+        exp_l = 1 - exp_w
 
-    # 2. Build training dataset using final/pre-match Elo diffs
+        elo_ratings[w] = rw + K * (1 - exp_w)
+        elo_ratings[l] = rl + K * (0 - exp_l)
+
+    # 2. Build feature training dataset with US Open matches
+    us_open_matches = all_matches[
+        all_matches["tourney_name"].str.contains("US Open", case=False, na=False)
+    ].copy()
     h2h_tracker = {}
     ml_rows = []
     np.random.seed(42)
 
     for _, row in us_open_matches.iterrows():
-        w, l = row["winner_name"], row["loser_name"]
+        winner, loser = row["winner_name"], row["loser_name"]
         swap = np.random.rand() > 0.5
-        pA, pB = (l, w) if swap else (w, l)
+        pA, pB = (loser, winner) if swap else (winner, loser)
         target = 0 if swap else 1
 
         pair_key = tuple(sorted([pA, pB]))
@@ -84,14 +91,20 @@ def load_and_train():
         h2h_diff = h2h_data.get(pA, 0) - h2h_data.get(pB, 0)
 
         if pair_key not in h2h_tracker:
-            h2h_tracker[pair_key] = {w: 1, l: 0}
+            h2h_tracker[pair_key] = {winner: 1, loser: 0}
         else:
-            h2h_tracker[pair_key][w] = h2h_tracker[pair_key].get(w, 0) + 1
+            h2h_tracker[pair_key][winner] = (
+                h2h_tracker[pair_key].get(winner, 0) + 1
+            )
 
-        # Real Elo difference
-        elo_diff = elo_ratings.get(pA, DEFAULT_ELO) - elo_ratings.get(pB, DEFAULT_ELO)
+        # Actual Elo difference from past performance against all opponents
+        elo_diff = elo_ratings.get(pA, DEFAULT_ELO) - elo_ratings.get(
+            pB, DEFAULT_ELO
+        )
 
-        ml_rows.append({"elo_diff": elo_diff, "h2h_diff": h2h_diff, "target": target})
+        ml_rows.append(
+            {"elo_diff": elo_diff, "h2h_diff": h2h_diff, "target": target}
+        )
 
     ml_df = pd.DataFrame(ml_rows)
     model = HistGradientBoostingClassifier(random_state=42)
@@ -101,7 +114,7 @@ def load_and_train():
 
 
 with st.spinner("🚀 Loading ATP Data & Training Gradient Boosting Model..."):
-    all_matches, h2h_tracker, model = load_and_train()
+    all_matches, h2h_tracker, elo_ratings, model = load_and_train()
 
 
 # Live Weather Integration
@@ -133,7 +146,7 @@ temp_c, wind_kmh = get_weather()
 col1, col2, col3 = st.columns(3)
 col1.metric("Flushing Meadows Temp", f"{temp_c}°C", "Live API")
 col2.metric("Max Wind Speed", f"{wind_kmh} km/h", "Outdoor Court")
-col3.metric("Model Architecture", "HistGradientBoosting", "3 Features")
+col3.metric("Model Architecture", "HistGradientBoosting", "Dynamic Elo + H2H")
 
 st.divider()
 
@@ -155,6 +168,11 @@ recent_ranks = (
     .head(8)
 )
 
+# Add computed Elo ratings to table display
+recent_ranks["Calculated Elo"] = recent_ranks["name"].apply(
+    lambda x: round(elo_ratings.get(x, 1500), 1)
+)
+
 st.subheader("📊 Top 8 Seeds & Dynamic Ratings")
 st.dataframe(
     recent_ranks.rename(
@@ -164,7 +182,7 @@ st.dataframe(
 )
 
 
-# Update Predict function to pass real elo_diff
+# Match Predictor Logic
 def predict(p1_name, p2_name):
     p1_elo = elo_ratings.get(p1_name, 1500)
     p2_elo = elo_ratings.get(p2_name, 1500)
@@ -174,12 +192,14 @@ def predict(p1_name, p2_name):
     h2h_data = h2h_tracker.get(pair_key, {p1_name: 0, p2_name: 0})
     h2h_diff = h2h_data.get(p1_name, 0) - h2h_data.get(p2_name, 0)
 
-    feats = pd.DataFrame([[elo_diff, h2h_diff]], columns=["elo_diff", "h2h_diff"])
+    feats = pd.DataFrame(
+        [[elo_diff, h2h_diff]], columns=["elo_diff", "h2h_diff"]
+    )
     prob = model.predict_proba(feats)[0][1]
 
     winner = p1_name if prob >= 0.5 else p2_name
     confidence = prob if prob >= 0.5 else (1 - prob)
-    return winner, confidence
+    return winner, confidence, elo_diff
 
 
 # Bracket Simulation Trigger
@@ -201,10 +221,14 @@ if st.button("▶ Run US Open Bracket Simulation", type="primary"):
         (roster[1], roster[6]),
     ]
     for idx, (p1, p2) in enumerate(qf_pairs):
-        winner, conf = predict(p1, p2)
+        winner, conf, ediff = predict(p1, p2)
         qf_winners.append(winner)
         with qf_cols[idx]:
-            st.info(f"**{p1}** vs **{p2}**\n\n👉 **{winner}** ({conf*100:.1f}%)")
+            st.info(
+                f"**{p1}** vs **{p2}**\n\n"
+                f"👉 **{winner}** ({conf*100:.1f}%)\n\n"
+                f"📈 Elo Diff: `{ediff:+.1f}`"
+            )
 
     # Semifinals
     st.markdown("### Semifinals")
@@ -216,14 +240,18 @@ if st.button("▶ Run US Open Bracket Simulation", type="primary"):
         (qf_winners[2], qf_winners[3]),
     ]
     for idx, (p1, p2) in enumerate(sf_pairs):
-        winner, conf = predict(p1, p2)
+        winner, conf, ediff = predict(p1, p2)
         sf_winners.append(winner)
         with sf_cols[idx]:
-            st.success(f"**{p1}** vs **{p2}**\n\n👉 **{winner}** ({conf*100:.1f}%)")
+            st.success(
+                f"**{p1}** vs **{p2}**\n\n"
+                f"👉 **{winner}** ({conf*100:.1f}%)\n\n"
+                f"📈 Elo Diff: `{ediff:+.1f}`"
+            )
 
     # Final
     st.markdown("### Championship Final")
-    champ, champ_conf = predict(sf_winners[0], sf_winners[1])
+    champ, champ_conf, ediff = predict(sf_winners[0], sf_winners[1])
 
     st.balloons()
     st.markdown(
@@ -231,6 +259,7 @@ if st.button("▶ Run US Open Bracket Simulation", type="primary"):
         <div class="winner-card">
             <h2>🏆 PREDICTED CHAMPION: {champ}</h2>
             <h3>Confidence Rating: {champ_conf*100:.1f}%</h3>
+            <p>Elo Differential Advantage: {ediff:+.1f}</p>
         </div>
     """,
         unsafe_allow_html=True,
