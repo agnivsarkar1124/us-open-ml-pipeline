@@ -4,14 +4,12 @@ import requests
 import streamlit as st
 from sklearn.ensemble import HistGradientBoostingClassifier
 
-# Page configuration
 st.set_page_config(
     page_title="2026 US Open AI Predictor",
     page_icon="🎾",
     layout="wide",
 )
 
-# Custom Styling
 st.markdown(
     """
     <style>
@@ -31,14 +29,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Title Banner
 st.title("🎾 US Open Match Prediction & Weather Pipeline")
-st.caption("Recency-Weighted Elo + Atmospheric Court Weather + Gradient Boosting")
+st.caption("Sequential Dynamic Elo + Court Weather + Gradient Boosting")
 
 
-# =====================================================================
-# DATA & MODEL LOADING (Cached for performance)
-# =====================================================================
 @st.cache_data
 def load_and_train():
     base_url = (
@@ -56,7 +50,7 @@ def load_and_train():
             pass
     all_matches = pd.concat(dfs, ignore_index=True).sort_values("tourney_date")
 
-    # 1. Compute dynamic Elo ratings across ALL matches against ALL players
+    # Compute Elo sequentially across ALL matches
     elo_ratings = {}
     K = 32
     DEFAULT_ELO = 1500
@@ -72,7 +66,6 @@ def load_and_train():
         elo_ratings[w] = rw + K * (1 - exp_w)
         elo_ratings[l] = rl + K * (0 - exp_l)
 
-    # 2. Build feature training dataset with US Open matches
     us_open_matches = all_matches[
         all_matches["tourney_name"].str.contains("US Open", case=False, na=False)
     ].copy()
@@ -97,7 +90,6 @@ def load_and_train():
                 h2h_tracker[pair_key].get(winner, 0) + 1
             )
 
-        # Actual Elo difference from past performance against all opponents
         elo_diff = elo_ratings.get(pA, DEFAULT_ELO) - elo_ratings.get(
             pB, DEFAULT_ELO
         )
@@ -117,7 +109,6 @@ with st.spinner("🚀 Loading ATP Data & Training Gradient Boosting Model..."):
     all_matches, h2h_tracker, elo_ratings, model = load_and_train()
 
 
-# Live Weather Integration
 def get_weather():
     try:
         res = requests.get(
@@ -140,9 +131,6 @@ def get_weather():
 
 temp_c, wind_kmh = get_weather()
 
-# =====================================================================
-# DASHBOARD LAYOUT
-# =====================================================================
 col1, col2, col3 = st.columns(3)
 col1.metric("Flushing Meadows Temp", f"{temp_c}°C", "Live API")
 col2.metric("Max Wind Speed", f"{wind_kmh} km/h", "Outdoor Court")
@@ -150,7 +138,6 @@ col3.metric("Model Architecture", "HistGradientBoosting", "Dynamic Elo + H2H")
 
 st.divider()
 
-# Roster Setup
 recent_ranks = (
     pd.concat([
         all_matches[["winner_name", "winner_rank"]].rename(
@@ -168,7 +155,6 @@ recent_ranks = (
     .head(8)
 )
 
-# Add computed Elo ratings to table display
 recent_ranks["Calculated Elo"] = recent_ranks["name"].apply(
     lambda x: round(elo_ratings.get(x, 1500), 1)
 )
@@ -182,7 +168,6 @@ st.dataframe(
 )
 
 
-# Match Predictor Logic
 def predict(p1_name, p2_name):
     p1_elo = elo_ratings.get(p1_name, 1500)
     p2_elo = elo_ratings.get(p2_name, 1500)
@@ -202,14 +187,12 @@ def predict(p1_name, p2_name):
     return winner, confidence, elo_diff
 
 
-# Bracket Simulation Trigger
 st.divider()
 st.subheader("🏆 Tournament Bracket Simulation")
 
 if st.button("▶ Run US Open Bracket Simulation", type="primary"):
     roster = recent_ranks["name"].tolist()
 
-    # Quarterfinals
     st.markdown("### Quarterfinals")
     qf_winners = []
     qf_cols = st.columns(4)
@@ -230,7 +213,6 @@ if st.button("▶ Run US Open Bracket Simulation", type="primary"):
                 f"📈 Elo Diff: `{ediff:+.1f}`"
             )
 
-    # Semifinals
     st.markdown("### Semifinals")
     sf_winners = []
     sf_cols = st.columns(2)
@@ -249,7 +231,6 @@ if st.button("▶ Run US Open Bracket Simulation", type="primary"):
                 f"📈 Elo Diff: `{ediff:+.1f}`"
             )
 
-    # Final
     st.markdown("### Championship Final")
     champ, champ_conf, ediff = predict(sf_winners[0], sf_winners[1])
 
