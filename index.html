@@ -212,7 +212,7 @@
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
             gap: 1rem;
         }
 
@@ -298,19 +298,23 @@
                 <div class="prob-bar-fill-b" id="barFillB" style="width: 50%;"></div>
             </div>
 
-            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--text-main);">📊 Model Feature Breakdown</h3>
+            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--text-main);">📊 Dynamic Analytics Breakdown</h3>
             <div class="stats-grid">
+                <div class="stat-card">
+                    <h4 id="labelPlayerAElo">Player 1 Elo</h4>
+                    <div class="val" id="playerAEloVal" style="color: var(--accent-green);">--</div>
+                </div>
+                <div class="stat-card">
+                    <h4 id="labelPlayerBElo">Player 2 Elo</h4>
+                    <div class="val" id="playerBEloVal" style="color: var(--accent-blue);">--</div>
+                </div>
                 <div class="stat-card">
                     <h4>Elo Difference</h4>
                     <div class="val" id="eloDiffVal">--</div>
                 </div>
                 <div class="stat-card">
-                    <h4>Head-To-Head Breakdown</h4>
+                    <h4>Head-To-Head Record</h4>
                     <div class="val" id="h2hVal">--</div>
-                </div>
-                <div class="stat-card">
-                    <h4>Primary Surface Factor</h4>
-                    <div class="val" style="color: var(--accent-gold);">Hard Court</div>
                 </div>
             </div>
 
@@ -385,19 +389,33 @@
             document.getElementById("barFillB").style.width = `${probB}%`;
 
             const breakdown = data.matchup_breakdown || {};
+
+            // Display Individual Dynamic Elo Ratings
+            if (breakdown.pA_elo !== undefined && breakdown.pB_elo !== undefined) {
+                document.getElementById("labelPlayerAElo").innerText = `${pA_name} Elo`;
+                document.getElementById("labelPlayerBElo").innerText = `${pB_name} Elo`;
+                document.getElementById("playerAEloVal").innerText = `${breakdown.pA_elo}`;
+                document.getElementById("playerBEloVal").innerText = `${breakdown.pB_elo}`;
+            } else {
+                document.getElementById("playerAEloVal").innerText = "N/A";
+                document.getElementById("playerBEloVal").innerText = "N/A";
+            }
             
+            // Display Head-To-Head Record
             if (breakdown.pA_h2h_wins !== undefined && breakdown.pB_h2h_wins !== undefined) {
                 document.getElementById("h2hVal").innerText = `${breakdown.pA_h2h_wins} - ${breakdown.pB_h2h_wins}`;
             } else {
                 document.getElementById("h2hVal").innerText = "0 - 0";
             }
 
+            // Display Net Elo Difference
             if (data.elo_diff !== undefined) {
                 document.getElementById("eloDiffVal").innerText = `${data.elo_diff > 0 ? '+' : ''}${data.elo_diff} Elo`;
             } else {
                 document.getElementById("eloDiffVal").innerText = "N/A";
             }
 
+            // Display Deciding Factors
             const factorsList = document.getElementById("decidingFactorsList");
             if (factorsList && breakdown.deciding_factors) {
                 factorsList.innerHTML = breakdown.deciding_factors
