@@ -46,7 +46,7 @@ def train_model():
 
     all_matches = pd.concat(dfs, ignore_index=True).sort_values("tourney_date")
 
-    # 1. Compute dynamic Elo ratings across ALL matches against ALL opponents
+    # 1. Compute dynamic Elo ratings sequentially across ALL matches against ALL opponents
     elo_ratings = {}
     K = 32
     DEFAULT_ELO = 1500
@@ -56,15 +56,13 @@ def train_model():
         rw = elo_ratings.get(w, DEFAULT_ELO)
         rl = elo_ratings.get(l, DEFAULT_ELO)
 
-        # Expected outcome
         exp_w = 1 / (1 + 10 ** ((rl - rw) / 400))
         exp_l = 1 - exp_w
 
-        # Update Elo scores post-match
         elo_ratings[w] = rw + K * (1 - exp_w)
         elo_ratings[l] = rl + K * (0 - exp_l)
 
-    # 2. Extract player statistics
+    # 2. Track overall player stats
     winners = all_matches["winner_name"].dropna().unique()
     losers = all_matches["loser_name"].dropna().unique()
     player_list = sorted(list(set(winners).union(set(losers))))
@@ -82,7 +80,7 @@ def train_model():
             "elo": elo_ratings.get(player, DEFAULT_ELO),
         }
 
-    # 3. Build Head-to-Head tracker
+    # 3. Build Head-to-Head record tracker
     for _, row in all_matches.iterrows():
         w, l = row["winner_name"], row["loser_name"]
         pair_key = tuple(sorted([w, l]))
@@ -91,7 +89,7 @@ def train_model():
         else:
             h2h_tracker[pair_key][w] = h2h_tracker[pair_key].get(w, 0) + 1
 
-    # 4. Build Training Set using dynamic player features
+    # 4. Build Training Dataset using dynamic features
     ml_rows = []
     np.random.seed(42)
 
@@ -105,7 +103,7 @@ def train_model():
         pA, pB = (loser, winner) if swap else (winner, loser)
         target = 0 if swap else 1
 
-        # Real calculated Elo difference from past matches
+        # Calculate actual Elo difference from past performance against all players
         elo_diff = elo_ratings.get(pA, DEFAULT_ELO) - elo_ratings.get(
             pB, DEFAULT_ELO
         )
@@ -119,12 +117,16 @@ def train_model():
         h2h_diff = h2h_data.get(pA, 0) - h2h_data.get(pB, 0)
 
         ml_rows.append(
-            {"elo_diff": elo_diff, "exp_diff": exp_diff, "h2h_diff": h2h_diff, "target": target}
+            {
+                "elo_diff": elo_diff,
+                "exp_diff": exp_diff,
+                "h2h_diff": h2h_diff,
+                "target": target,
+            }
         )
 
     ml_df = pd.DataFrame(ml_rows)
 
-    # Train model on dynamic Elo diff, match count diff, and H2H diff
     model = HistGradientBoostingClassifier(
         random_state=42,
         max_iter=100,
@@ -172,7 +174,7 @@ def predict_matchup(req: MatchupRequest):
         p2, {"win_rate": 0.5, "total_matches": 0, "wins": 0}
     )
 
-    # Real calculated Elo difference across all past opponents
+    # Real calculated Elo ratings
     p1_elo = elo_ratings.get(p1, 1500)
     p2_elo = elo_ratings.get(p2, 1500)
     elo_diff = p1_elo - p2_elo
@@ -184,7 +186,6 @@ def predict_matchup(req: MatchupRequest):
     p2_h2h = h2h_data.get(p2, 0)
     h2h_diff = p1_h2h - p2_h2h
 
-    # Predict using real calculated Elo feature
     feats = pd.DataFrame(
         [[elo_diff, exp_diff, h2h_diff]],
         columns=["elo_diff", "exp_diff", "h2h_diff"],
@@ -196,7 +197,6 @@ def predict_matchup(req: MatchupRequest):
     winner = p1 if clipped_prob >= 0.5 else p2
     confidence = clipped_prob if clipped_prob >= 0.5 else (1 - clipped_prob)
 
-    # Human-readable factors
     deciding_factors = []
     if abs(elo_diff) > 25:
         higher_elo = p1 if elo_diff > 0 else p2
@@ -221,9 +221,7 @@ def predict_matchup(req: MatchupRequest):
     return {
         "winner": winner,
         "confidence": round(confidence * 100, 1),
-        "elo_diff": round(
-            elo_diff, 1
-        ),  # Actual calculated Elo difference score
+        "elo_diff": round(elo_diff, 1),
         "h2h_diff": h2h_diff,
         "matchup_breakdown": {
             "pA_name": p1,
