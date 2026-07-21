@@ -257,7 +257,7 @@
 <div class="container">
     <div class="header">
         <h1>🎾 2026 US Open AI Match Predictor</h1>
-        <p>Gradient Boosting Classifier • Recency-Weighted Elo • Hard Court Analytics</p>
+        <p>Gradient Boosting Classifier • Dynamic Historical Elo • Hard Court Analytics</p>
         <div class="status-badge"><span class="dot"></span> API Model Live</div>
     </div>
 
@@ -323,7 +323,7 @@
             <div id="featureExplanationCard" style="margin-top: 1.5rem; background: var(--card-inner); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
                 <h4 style="margin-top: 0; color: var(--accent-blue); font-size: 1rem;">💡 Why this prediction?</h4>
                 <ul id="decidingFactorsList" style="padding-left: 1.2rem; color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0; line-height: 1.6;">
-                    </ul>
+                </ul>
             </div>
 
         </div>
@@ -403,9 +403,12 @@
                 document.getElementById("h2hVal").innerText = "0 - 0";
             }
 
-            document.getElementById("eloDiffVal").innerText = data.h2h_diff !== undefined 
-                ? `${data.h2h_diff > 0 ? '+' : ''}${data.h2h_diff} H2H edge` 
-                : "N/A";
+            // Fixed: Display actual calculated Elo difference instead of H2H edge
+            if (data.elo_diff !== undefined) {
+                document.getElementById("eloDiffVal").innerText = `${data.elo_diff > 0 ? '+' : ''}${data.elo_diff} Elo`;
+            } else {
+                document.getElementById("eloDiffVal").innerText = "N/A";
+            }
 
             // Render Deciding Factors
             const factorsList = document.getElementById("decidingFactorsList");
@@ -414,7 +417,7 @@
                     .map(factor => `<li>${factor}</li>`)
                     .join("");
             } else if (factorsList) {
-                factorsList.innerHTML = "<li>Historical H2H weighting and surface baseline analysis</li>";
+                factorsList.innerHTML = "<li>Historical Elo ratings and hard court baseline analysis</li>";
             }
 
             document.getElementById("loader").style.display = "none";
