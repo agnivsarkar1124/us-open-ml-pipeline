@@ -46,7 +46,7 @@ def train_model():
 
     all_matches = pd.concat(dfs, ignore_index=True).sort_values("tourney_date")
 
-    # 1. Compute dynamic Elo ratings across ALL matches against ALL players
+    # 1. Compute dynamic Elo ratings across ALL matches against ALL opponents
     elo_ratings = {}
     K = 32
     DEFAULT_ELO = 1500
@@ -64,68 +64,74 @@ def train_model():
         elo_ratings[w] = rw + K * (1 - exp_w)
         elo_ratings[l] = rl + K * (0 - exp_l)
 
-    # 2. Track general player statistics
-    winners = all_matches["winner_name"].value_counts()
-    losers = all_matches["loser_name"].value_counts()
-    all_players = set(winners.index).union(set(losers.index))
+    # 2. Extract player statistics
+    winners = all_matches["winner_name"].dropna().unique()
+    losers = all_matches["loser_name"].dropna().unique()
+    player_list = sorted(list(set(winners).union(set(losers))))
 
-    for p in all_players:
-        w_cnt = winners.get(p, 0)
-        l_cnt = losers.get(p, 0)
-        tot = w_cnt + l_cnt
-        player_stats[p] = {
-            "wins": w_cnt,
-            "losses": l_cnt,
-            "total_matches": tot,
-            "win_rate": w_cnt / tot if tot > 0 else 0.5,
-            "elo": elo_ratings.get(p, DEFAULT_ELO),
+    for player in player_list:
+        wins = len(all_matches[all_matches["winner_name"] == player])
+        losses = len(all_matches[all_matches["loser_name"] == player])
+        total = wins + losses
+        win_rate = (wins / total) if total > 5 else 0.50
+        player_stats[player] = {
+            "wins": wins,
+            "losses": losses,
+            "total_matches": total,
+            "win_rate": win_rate,
+            "elo": elo_ratings.get(player, DEFAULT_ELO),
         }
 
-    player_list = sorted(list(all_players))
-
-    # 3. Build training set using US Open matches & calculated Elo differentials
-    us_open_matches = all_matches[
-        all_matches["tourney_name"].str.contains("US Open", case=False, na=False)
-    ].copy()
-
-    h2h_tracker = {}
-    ml_rows = []
-    np.random.seed(42)
-
-    for _, row in us_open_matches.iterrows():
+    # 3. Build Head-to-Head tracker
+    for _, row in all_matches.iterrows():
         w, l = row["winner_name"], row["loser_name"]
-
-        # Randomize player positions to avoid target bias
-        swap = np.random.rand() > 0.5
-        pA, pB = (l, w) if swap else (w, l)
-        target = 0 if swap else 1
-
-        # Track H2H history
-        pair_key = tuple(sorted([pA, pB]))
-        h2h_data = h2h_tracker.get(pair_key, {pA: 0, pB: 0})
-        h2h_diff = h2h_data.get(pA, 0) - h2h_data.get(pB, 0)
-
+        pair_key = tuple(sorted([w, l]))
         if pair_key not in h2h_tracker:
             h2h_tracker[pair_key] = {w: 1, l: 0}
         else:
             h2h_tracker[pair_key][w] = h2h_tracker[pair_key].get(w, 0) + 1
 
-        # Calculate dynamic Elo difference from all historical matches
+    # 4. Build Training Set using dynamic player features
+    ml_rows = []
+    np.random.seed(42)
+
+    us_open_matches = all_matches[
+        all_matches["tourney_name"].str.contains("US Open", case=False, na=False)
+    ].copy()
+
+    for _, row in us_open_matches.iterrows():
+        winner, loser = row["winner_name"], row["loser_name"]
+        swap = np.random.rand() > 0.5
+        pA, pB = (loser, winner) if swap else (winner, loser)
+        target = 0 if swap else 1
+
+        # Real calculated Elo difference from past matches
         elo_diff = elo_ratings.get(pA, DEFAULT_ELO) - elo_ratings.get(
             pB, DEFAULT_ELO
         )
 
+        pA_matches = player_stats.get(pA, {}).get("total_matches", 0)
+        pB_matches = player_stats.get(pB, {}).get("total_matches", 0)
+        exp_diff = pA_matches - pB_matches
+
+        pair_key = tuple(sorted([pA, pB]))
+        h2h_data = h2h_tracker.get(pair_key, {pA: 0, pB: 0})
+        h2h_diff = h2h_data.get(pA, 0) - h2h_data.get(pB, 0)
+
         ml_rows.append(
-            {"elo_diff": elo_diff, "h2h_diff": h2h_diff, "target": target}
+            {"elo_diff": elo_diff, "exp_diff": exp_diff, "h2h_diff": h2h_diff, "target": target}
         )
 
     ml_df = pd.DataFrame(ml_rows)
 
-    # Train model on real elo_diff and h2h_diff
+    # Train model on dynamic Elo diff, match count diff, and H2H diff
     model = HistGradientBoostingClassifier(
-        random_state=42, max_iter=100, min_samples_leaf=10, l2_regularization=1.0
+        random_state=42,
+        max_iter=100,
+        min_samples_leaf=10,
+        l2_regularization=1.0,
     )
-    model.fit(ml_df[["elo_diff", "h2h_diff"]], ml_df["target"])
+    model.fit(ml_df[["elo_diff", "exp_diff", "h2h_diff"]], ml_df["target"])
 
 
 @app.on_event("startup")
@@ -166,21 +172,22 @@ def predict_matchup(req: MatchupRequest):
         p2, {"win_rate": 0.5, "total_matches": 0, "wins": 0}
     )
 
-    # Actual Elo rating calculation across all past opponents
+    # Real calculated Elo difference across all past opponents
     p1_elo = elo_ratings.get(p1, 1500)
     p2_elo = elo_ratings.get(p2, 1500)
     elo_diff = p1_elo - p2_elo
+    exp_diff = p1_stats["total_matches"] - p2_stats["total_matches"]
 
-    # Head-to-Head tracking
     pair_key = tuple(sorted([p1, p2]))
     h2h_data = h2h_tracker.get(pair_key, {p1: 0, p2: 0})
     p1_h2h = h2h_data.get(p1, 0)
     p2_h2h = h2h_data.get(p2, 0)
     h2h_diff = p1_h2h - p2_h2h
 
-    # Predict using elo_diff and h2h_diff
+    # Predict using real calculated Elo feature
     feats = pd.DataFrame(
-        [[elo_diff, h2h_diff]], columns=["elo_diff", "h2h_diff"]
+        [[elo_diff, exp_diff, h2h_diff]],
+        columns=["elo_diff", "exp_diff", "h2h_diff"],
     )
     raw_prob = float(model.predict_proba(feats)[0][1])
 
@@ -201,12 +208,8 @@ def predict_matchup(req: MatchupRequest):
         deciding_factors.append(
             f"{leader} leads the Head-to-Head series ({max(p1_h2h, p2_h2h)}-{min(p1_h2h, p2_h2h)})"
         )
-    if abs(p1_stats["total_matches"] - p2_stats["total_matches"]) > 15:
-        more_exp = (
-            p1
-            if p1_stats["total_matches"] > p2_stats["total_matches"]
-            else p2
-        )
+    if abs(exp_diff) > 15:
+        more_exp = p1 if exp_diff > 0 else p2
         deciding_factors.append(
             f"{more_exp} has significantly higher ATP Tour match density"
         )
