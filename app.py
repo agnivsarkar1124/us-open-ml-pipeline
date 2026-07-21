@@ -164,13 +164,17 @@ st.dataframe(
 )
 
 
-# Match Predictor Logic
+# Update Predict function to pass real elo_diff
 def predict(p1_name, p2_name):
+    p1_elo = elo_ratings.get(p1_name, 1500)
+    p2_elo = elo_ratings.get(p2_name, 1500)
+    elo_diff = p1_elo - p2_elo
+
     pair_key = tuple(sorted([p1_name, p2_name]))
     h2h_data = h2h_tracker.get(pair_key, {p1_name: 0, p2_name: 0})
     h2h_diff = h2h_data.get(p1_name, 0) - h2h_data.get(p2_name, 0)
 
-    feats = pd.DataFrame([[0, h2h_diff]], columns=["elo_diff", "h2h_diff"])
+    feats = pd.DataFrame([[elo_diff, h2h_diff]], columns=["elo_diff", "h2h_diff"])
     prob = model.predict_proba(feats)[0][1]
 
     winner = p1_name if prob >= 0.5 else p2_name
