@@ -1,20 +1,27 @@
-# 🎾 US Open Match Prediction & Weather-Adjusted Elo Pipeline
+# 🎾 2026 US Open AI Match Analytics & Pre-Draw Engine
 
-An end-to-end Machine Learning pipeline that predicts US Open tennis match outcomes using dynamic recency-weighted Elo ratings, atmospheric court weather integration, and gradient boosting classifiers.
+An end-to-end Machine Learning pipeline and web application built to predict high-stakes ATP hard-court matchups and explain the feature attributions behind every prediction.
 
-## 🚀 Key Features
-* **Recency-Weighted Elo Engine:** Calculates player ratings with exponential time-decay modeling across 10,000+ ATP match records.
-* **Live Weather Integration:** Fetches real-time temperature and wind data via the Open-Meteo API to adjust player Elo parameters based on stamina and ace efficiency.
-* **Leak-Free ML Feature Engineering:** Computes pre-match Elo differentials, hard court win percentages, and dynamic Head-to-Head (H2H) records.
-* **Tournament Bracket Simulation:** Trains a `HistGradientBoostingClassifier` to simulate multi-round bracket match predictions.
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=flat&logo=fastapi&logoColor=white)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-Gradient_Boosting-F7931E?style=flat&logo=scikit-learn&logoColor=white)
+![GitHub Pages](https://img.shields.io/badge/Frontend-GitHub_Pages-222222?style=flat&logo=github&logoColor=white)
+![Render](https://img.shields.io/badge/Hosting-Render-46E3B7?style=flat&logo=render&logoColor=white)
 
-## 🛠️ Tech Stack
-* **Language:** Python
-* **ML / Stats:** Scikit-Learn (`HistGradientBoostingClassifier`), NumPy, Pandas
-* **API Integration:** Open-Meteo API (REST / JSON)
+---
 
-## 🏃 Getting Started
+## 📌 Overview
 
-### Prerequisites
-```bash
-pip install pandas numpy requests scikit-learn
+The **2026 US Open AI Match Analytics Engine** is an interactive scouting tool designed to evaluate 1v1 ATP tennis matchups prior to the release of the official tournament draw. 
+
+Using historical ATP match performance datasets (2020–2023), the engine trains a **HistGradientBoostingClassifier** on relative win rates, head-to-head records, and ATP Tour match density to deliver calibrated win probabilities alongside human-interpretable decision factors.
+
+### 🌟 Key Features
+* **Interactive 1v1 Matchup Engine:** Select any two players from a dynamically loaded ATP roster to generate real-time match predictions.
+* **Calibrated Win Probabilities:** Features l2-regularized probability bounds (capped at realistic ~12%–88% sports variance bounds) to eliminate uncalibrated tree extremity.
+* **Feature Attribution & "Why This Prediction?":** Breaks down head-to-head metrics, overall win-rate differentials, and match experience to explain *how* the model reached its verdict.
+* **Pre-Draw Positioning:** Designed as a flexible scenario simulator ahead of the full 128-player US Open bracket release.
+
+---
+
+## 🛠️ Tech Stack & Architecture
