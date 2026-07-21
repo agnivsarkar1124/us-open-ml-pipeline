@@ -103,7 +103,12 @@ def train_model():
     ml_df = pd.DataFrame(ml_rows)
     
     # Train model on win rate diff, match count diff, and h2h diff
-    model = HistGradientBoostingClassifier(random_state=42, max_iter=100)
+    model = HistGradientBoostingClassifier(
+        random_state=42, 
+        max_iter=100, 
+        min_samples_leaf=10,  # Prevents over-fitting on tiny player samples
+        l2_regularization=1.0 # Smooths probability outputs
+    )
     model.fit(ml_df[["win_rate_diff", "exp_diff", "h2h_diff"]], ml_df["target"])
 
 @app.on_event("startup")
