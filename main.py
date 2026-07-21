@@ -11,7 +11,7 @@ app = FastAPI(title="US Open Prediction API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # Allows requests from agnivsarkar1124.github.io
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
