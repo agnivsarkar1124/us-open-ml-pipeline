@@ -145,11 +145,15 @@ def predict_matchup(req: MatchupRequest):
     h2h_diff = p1_h2h - p2_h2h
 
     # Predict probability using real features
+    # Predict probability using real features
     feats = pd.DataFrame([[wr_diff, exp_diff, h2h_diff]], columns=["win_rate_diff", "exp_diff", "h2h_diff"])
-    prob = float(model.predict_proba(feats)[0][1])
+    raw_prob = float(model.predict_proba(feats)[0][1])
 
-    winner = p1 if prob >= 0.5 else p2
-    confidence = prob if prob >= 0.5 else (1 - prob)
+    # 🛠️ Clip extreme probabilities to realistic sports bounds (max 88%, min 12%)
+    clipped_prob = np.clip(raw_prob, 0.12, 0.88)
+
+    winner = p1 if clipped_prob >= 0.5 else p2
+    confidence = clipped_prob if clipped_prob >= 0.5 else (1 - clipped_prob)
 
     # Human-readable factors
     deciding_factors = []
