@@ -18,10 +18,137 @@ Using historical ATP match performance datasets (2020–2023), the engine trains
 
 ### 🌟 Key Features
 * **Interactive 1v1 Matchup Engine:** Select any two players from a dynamically loaded ATP roster to generate real-time match predictions.
-* **Calibrated Win Probabilities:** Features l2-regularized probability bounds (capped at realistic ~12%–88% sports variance bounds) to eliminate uncalibrated tree extremity.
+* **Calibrated Win Probabilities:** Features L2-regularized probability bounds (capped at realistic ~12%–88% sports variance bounds) to eliminate uncalibrated tree extremity.
 * **Feature Attribution & "Why This Prediction?":** Breaks down head-to-head metrics, overall win-rate differentials, and match experience to explain *how* the model reached its verdict.
 * **Pre-Draw Positioning:** Designed as a flexible scenario simulator ahead of the full 128-player US Open bracket release.
 
 ---
 
 ## 🛠️ Tech Stack & Architecture
+
+```text
+                   +----------------------------------+
+                   |    GitHub Pages (index.html)     |
+                   |   Vanilla JS / CSS3 UI Engine    |
+                   +----------------------------------+
+                                    |
+                                    | REST API (POST /predict)
+                                    v
+                   +----------------------------------+
+                   |        FastAPI Backend           |
+                   |      (Hosted on Render)          |
+                   +----------------------------------+
+                                    |
+            +-----------------------+-----------------------+
+            |                                               |
+            v                                               v
++-----------------------+                       +-----------------------+
+|  ATP Historical Data  |                       | HistGradientBoosting  |
+|  (2020-2023 Datasets) |                       |   Classifier Model    |
++-----------------------+                       +-----------------------+
+```
+
+* **Frontend:** Single-Page Application (SPA) hosted on **GitHub Pages**, styled with custom dark-mode CSS and asynchronous JavaScript fetch pipelines.
+* **Backend:** **FastAPI** application deployed on **Render** with CORS middleware enabled.
+* **Machine Learning:** `scikit-learn` (`HistGradientBoostingClassifier`), `pandas`, and `numpy`.
+
+---
+
+## 📊 Feature Pipeline
+
+The model calculates three core features for every matchup:
+
+1. **Win Rate Differential (`win_rate_diff`):** Calculates overall career win rates on the ATP Tour across historical datasets.
+2. **Match Density Differential (`exp_diff`):** Measures total professional matches played to account for veteran experience and data density.
+3. **Head-to-Head Differential (`h2h_diff`):** Tracks historical match wins between Player A and Player B.
+
+---
+
+## 🚀 API Endpoint Reference
+
+### Base URL
+`https://two026-us-open-ml-predictor.onrender.com`
+
+### `GET /players`
+Returns the list of all available ATP players parsed from the historical match dataset.
+
+### `POST /predict`
+Executes match prediction and feature attribution.
+
+**Request Body:**
+```json
+{
+  "pA_name": "Novak Djokovic",
+  "pB_name": "Carlos Alcaraz"
+}
+```
+
+**Response Example:**
+```json
+{
+  "winner": "Novak Djokovic",
+  "confidence": 64.2,
+  "elo_diff": 112.5,
+  "h2h_diff": 1,
+  "matchup_breakdown": {
+    "pA_name": "Novak Djokovic",
+    "pB_name": "Carlos Alcaraz",
+    "pA_h2h_wins": 3,
+    "pB_h2h_wins": 2,
+    "pA_total_atp_wins": 182,
+    "pB_total_atp_wins": 124,
+    "deciding_factors": [
+      "Novak Djokovic holds a higher overall ATP win rate (83.1%)",
+      "Novak Djokovic leads the Head-to-Head series (3-2)",
+      "Novak Djokovic has significantly higher ATP Tour match density"
+    ]
+  }
+}
+```
+
+---
+
+## 🔧 Local Setup & Installation
+
+### Prerequisites
+* Python 3.9+
+* Pip
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/your-username/your-repo-name.git
+cd your-repo-name
+```
+
+### 2. Install dependencies
+```bash
+pip install fastapi uvicorn pandas numpy scikit-learn
+```
+
+### 3. Run the FastAPI backend locally
+```bash
+uvicorn main:app --reload
+```
+The server will start at `http://127.0.0.1:8000`.
+
+### 4. View the frontend
+Simply open `index.html` in your web browser, or serve it using Python's built-in HTTP server:
+```bash
+python -m http.server 8080
+```
+
+---
+
+## 🗓️ Roadmap & Future Enhancements
+
+- [x] Pre-draw 1v1 matchup simulator.
+- [x] Feature attribution and "Why this prediction?" breakdown.
+- [x] Probability calibration and clipping bounds.
+- [ ] Surface-specific (Hard Court only) historical filtering.
+- [ ] 128-Player Tournament Bracket Simulator *(Unlocks upon official 2026 US Open Draw reveal)*.
+
+---
+
+## 📜 License
+
+Distributed under the MIT License.
