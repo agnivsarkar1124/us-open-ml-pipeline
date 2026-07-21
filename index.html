@@ -35,7 +35,6 @@
             width: 100%;
         }
 
-        /* Header Styling */
         .header {
             text-align: center;
             margin-bottom: 2rem;
@@ -76,7 +75,6 @@
             display: inline-block;
         }
 
-        /* Dashboard Grid */
         .card {
             background: var(--card-bg);
             border: 1px solid var(--border-color);
@@ -144,7 +142,6 @@
             text-align: center;
         }
 
-        /* Predict Button */
         .btn-predict {
             width: 100%;
             background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
@@ -164,7 +161,6 @@
             box-shadow: 0 4px 15px rgba(34, 197, 94, 0.3);
         }
 
-        /* Prediction Output Section */
         .result-container {
             display: none;
         }
@@ -184,7 +180,6 @@
             margin: 0 0 0.5rem 0;
         }
 
-        /* Probability Meter */
         .prob-meter-label {
             display: flex;
             justify-content: space-between;
@@ -215,7 +210,6 @@
             transition: width 0.6s ease;
         }
 
-        /* Feature Breakdown Cards */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -333,7 +327,6 @@
 <script>
     const API_URL = "https://two026-us-open-ml-predictor.onrender.com";
 
-    // 1. Fetch player list directly from Python backend on load
     async function loadPlayers() {
         const pA = document.getElementById("playerA");
         const pB = document.getElementById("playerB");
@@ -357,7 +350,6 @@
         }
     }
 
-    // 2. Submit matchup to API & Render full breakdown
     async function runPrediction() {
         const pA_name = document.getElementById("playerA").value;
         const pB_name = document.getElementById("playerB").value;
@@ -381,11 +373,9 @@
 
             const data = await res.json();
             
-            // Populate Results Header
             document.getElementById("winnerName").innerText = `🏆 ${data.winner}`;
             document.getElementById("winConfidenceBadge").innerText = `${data.confidence}% Win Probability`;
 
-            // Calculate probabilities for progress bar
             let probA = data.winner === pA_name ? data.confidence : (100 - data.confidence).toFixed(1);
             let probB = (100 - probA).toFixed(1);
 
@@ -394,7 +384,6 @@
             document.getElementById("barFillA").style.width = `${probA}%`;
             document.getElementById("barFillB").style.width = `${probB}%`;
 
-            // Feature metrics
             const breakdown = data.matchup_breakdown || {};
             
             if (breakdown.pA_h2h_wins !== undefined && breakdown.pB_h2h_wins !== undefined) {
@@ -403,14 +392,12 @@
                 document.getElementById("h2hVal").innerText = "0 - 0";
             }
 
-            // Fixed: Display actual calculated Elo difference instead of H2H edge
             if (data.elo_diff !== undefined) {
                 document.getElementById("eloDiffVal").innerText = `${data.elo_diff > 0 ? '+' : ''}${data.elo_diff} Elo`;
             } else {
                 document.getElementById("eloDiffVal").innerText = "N/A";
             }
 
-            // Render Deciding Factors
             const factorsList = document.getElementById("decidingFactorsList");
             if (factorsList && breakdown.deciding_factors) {
                 factorsList.innerHTML = breakdown.deciding_factors
