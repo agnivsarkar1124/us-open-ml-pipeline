@@ -116,8 +116,8 @@ Executes match prediction and feature attribution.
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/your-username/your-repo-name.git
-cd your-repo-name
+git clone https://github.com/agnivsarkar1124/us-open-ml-pipeline
+cd us-open-ml-pipeline
 ```
 
 ### 2. Install dependencies
