@@ -116,7 +116,7 @@ Executes match prediction and feature attribution.
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/agnivsarkar1124/us-open-ml-pipeline
+git clone https://github.com/agnivsarkar1124/us-open-ml-pipeline 
 cd us-open-ml-pipeline
 ```
 
