@@ -136,6 +136,8 @@ Simply open `index.html` in your web browser, or serve it using Python's built-i
 ```bash
 python -m http.server 8080
 ```
+# Live Demo
+https://agnivsarkar1124.github.io/us-open-ml-pipeline/
 
 ---
 
