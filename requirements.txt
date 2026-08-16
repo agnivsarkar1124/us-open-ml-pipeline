@@ -2,6 +2,7 @@ fastapi
 uvicorn
 pandas
 scikit-learn
-numpyasyncpg==0.30.0
+numpy
+asyncpg==0.30.0
 redis==5.2.1
 python-dotenv==1.0.1
