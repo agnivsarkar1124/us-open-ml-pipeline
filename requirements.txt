@@ -3,6 +3,6 @@ uvicorn
 pandas
 scikit-learn
 numpy
-psycopg[binary,pool]==3.2.3
+psycopg[binary,pool]==3.2.13
 redis==5.2.1
 python-dotenv==1.0.1
