@@ -96,6 +96,16 @@ async def save_artifacts(
         )
 
 
+async def get_trained_at() -> str | None:
+    """Lightweight check for /system-status — just the timestamp, no payload."""
+    pool = get_pool()
+    async with pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute("SELECT trained_at FROM model_artifacts WHERE id = 1;")
+            row = await cur.fetchone()
+    return row["trained_at"].isoformat() if row else None
+
+
 async def load_artifacts(max_age_hours: int = 24) -> dict | None:
     """
     Return cached artifacts if present and fresh enough, else None.
@@ -128,4 +138,5 @@ async def load_artifacts(max_age_hours: int = 24) -> dict | None:
         "player_stats": row["player_stats"],
         "h2h_tracker": h2h_tracker,
         "player_list": row["player_list"],
+        "trained_at": row["trained_at"].isoformat(),
     }

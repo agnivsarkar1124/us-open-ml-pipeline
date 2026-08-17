@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import time
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,11 +30,12 @@ def _swap_matchup_fields(cached: dict, p1: str, p2: str) -> dict:
     """
     breakdown = cached["matchup_breakdown"]
     if breakdown["pA_name"].lower() == p1.strip().lower():
-        return cached
+        return {**cached, "cached": True}
 
     swapped = dict(cached)
     swapped["elo_diff"] = -cached["elo_diff"]
     swapped["h2h_diff"] = -cached["h2h_diff"]
+    swapped["cached"] = True
     swapped["matchup_breakdown"] = {
         **breakdown,
         "pA_name": breakdown["pB_name"],
@@ -191,6 +193,17 @@ def health_check():
     return {"status": "online", "players_loaded": len(player_list)}
 
 
+@app.get("/system-status")
+async def system_status():
+    """Visible proof the caching/pooling layer is active — last Postgres
+    training timestamp and in-process Redis hit/miss counts since deploy."""
+    trained_at = await db.get_trained_at()
+    return {
+        "postgres_last_trained_at": trained_at,
+        "redis_stats": cache.stats,
+    }
+
+
 @app.get("/players")
 async def get_players():
     if not player_list:
@@ -209,11 +222,14 @@ async def predict_matchup(req: MatchupRequest):
     if model is None:
         raise HTTPException(status_code=500, detail="Model not trained")
 
+    start = time.perf_counter()
     p1, p2 = req.pA_name, req.pB_name
 
     cached = await cache.get_cached_predict(p1, p2)
     if cached is not None:
-        return _swap_matchup_fields(cached, p1, p2)
+        result = _swap_matchup_fields(cached, p1, p2)
+        result["response_time_ms"] = round((time.perf_counter() - start) * 1000, 1)
+        return result
 
     p1_stats = player_stats.get(p1, {"win_rate": 0.5, "total_matches": 0, "wins": 0})
     p2_stats = player_stats.get(p2, {"win_rate": 0.5, "total_matches": 0, "wins": 0})
@@ -259,6 +275,7 @@ async def predict_matchup(req: MatchupRequest):
         "confidence": round(confidence * 100, 1),
         "elo_diff": round(elo_diff, 1),
         "h2h_diff": h2h_diff,
+        "cached": False,
         "matchup_breakdown": {
             "pA_name": p1,
             "pB_name": p2,
@@ -273,4 +290,5 @@ async def predict_matchup(req: MatchupRequest):
     }
 
     await cache.set_cached_predict(p1, p2, result)
+    result["response_time_ms"] = round((time.perf_counter() - start) * 1000, 1)
     return result

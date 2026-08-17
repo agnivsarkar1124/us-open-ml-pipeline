@@ -20,6 +20,11 @@ PLAYERS_TTL_SECONDS = 60 * 60       # 1 hour
 
 _redis_client: redis.Redis | None = None
 
+# In-process counters for /system-status. These reset on every restart —
+# that's fine, the point is to show cache behavior since the last deploy,
+# not a permanent metric store.
+stats = {"predict_hits": 0, "predict_misses": 0, "players_hits": 0, "players_misses": 0}
+
 
 def init_redis() -> redis.Redis:
     global _redis_client
@@ -58,7 +63,11 @@ def predict_cache_key(pA_name: str, pB_name: str) -> str:
 async def get_cached_predict(pA_name: str, pB_name: str) -> dict | None:
     client = get_redis()
     raw = await client.get(predict_cache_key(pA_name, pB_name))
-    return json.loads(raw) if raw else None
+    if raw:
+        stats["predict_hits"] += 1
+        return json.loads(raw)
+    stats["predict_misses"] += 1
+    return None
 
 
 async def set_cached_predict(pA_name: str, pB_name: str, payload: dict) -> None:
@@ -73,7 +82,11 @@ async def set_cached_predict(pA_name: str, pB_name: str, payload: dict) -> None:
 async def get_cached_players() -> list | None:
     client = get_redis()
     raw = await client.get("players:list")
-    return json.loads(raw) if raw else None
+    if raw:
+        stats["players_hits"] += 1
+        return json.loads(raw)
+    stats["players_misses"] += 1
+    return None
 
 
 async def set_cached_players(players: list) -> None:

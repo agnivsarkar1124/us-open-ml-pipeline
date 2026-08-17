@@ -1,444 +1,437 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>2026 US Open AI Predictor & Match Analytics</title>
-    <style>
-        :root {
-            --bg-dark: #0b0f19;
-            --card-bg: #1e293b;
-            --card-inner: #0f172a;
-            --accent-green: #22c55e;
-            --accent-blue: #38bdf8;
-            --accent-gold: #eab308;
-            --border-color: #334155;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2026 US Open AI Predictor & Match Analytics</title>
+<style>
+:root {
+  --bg-dark: #0b0f19;
+  --card-bg: #1e293b;
+  --card-inner: #0f172a;
+  --accent-green: #22c55e;
+  --accent-blue: #38bdf8;
+  --accent-gold: #eab308;
+  --accent-purple: #a78bfa;
+  --border-color: #334155;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--bg-dark);
+  color: var(--text-main);
+  margin: 0;
+  padding: 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+.container { max-width: 900px; width: 100%; }
+.header { text-align: center; margin-bottom: 2rem; }
+.header h1 {
+  font-size: 2.2rem;
+  margin: 0 0 0.5rem 0;
+  background: linear-gradient(135deg, #fff 0%, var(--accent-blue) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.header p { color: var(--text-muted); font-size: 0.95rem; margin: 0; }
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--accent-green);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  margin-top: 0.75rem;
+}
+.dot { width: 8px; height: 8px; background-color: var(--accent-green); border-radius: 50%; display: inline-block; }
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+}
+.matchup-select-grid {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 1rem;
+  align-items: center;
+}
+@media (max-width: 600px) {
+  .matchup-select-grid { grid-template-columns: 1fr; }
+  .vs-badge { margin: 0.5rem auto; }
+}
+.player-box {
+  background: var(--card-inner);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem;
+}
+.player-box label {
+  display: block;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent-blue);
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+select {
+  width: 100%;
+  background: #1e293b;
+  border: 1px solid var(--border-color);
+  color: #fff;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 1rem;
+  outline: none;
+}
+select:focus { border-color: var(--accent-blue); }
+.vs-badge {
+  background: var(--border-color);
+  color: var(--text-muted);
+  font-weight: bold;
+  font-size: 0.9rem;
+  padding: 8px 12px;
+  border-radius: 50%;
+  text-align: center;
+}
+.btn-predict {
+  width: 100%;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: #000;
+  font-size: 1.1rem;
+  font-weight: bold;
+  border: none;
+  padding: 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 1rem;
+}
+.btn-predict:hover { transform: translateY(-2px); box-shadow: 0 4px 15px rgba(34, 197, 94, 0.3); }
+.result-container { display: none; }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: var(--bg-dark);
-            color: var(--text-main);
-            margin: 0;
-            padding: 2rem 1rem;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
-            box-sizing: border-box;
-        }
+/* --- New: cache / latency proof badge --- */
+.perf-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  font-weight: bold;
+  border: 1px solid var(--border-color);
+  transition: all 0.2s;
+}
+.perf-badge.hit {
+  background: rgba(167, 139, 250, 0.12);
+  border-color: rgba(167, 139, 250, 0.4);
+  color: var(--accent-purple);
+}
+.perf-badge.miss {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--accent-blue);
+}
+.perf-badge .sep { color: var(--text-muted); font-weight: normal; }
 
-        .container {
-            max-width: 900px;
-            width: 100%;
-        }
+.winner-banner {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(15, 23, 42, 0.8) 100%);
+  border: 1px solid var(--accent-green);
+  border-radius: 10px;
+  padding: 1.5rem;
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+.winner-title { color: var(--accent-green); font-size: 1.6rem; margin: 0 0 0.5rem 0; }
+.prob-meter-label { display: flex; justify-content: space-between; font-size: 0.9rem; font-weight: bold; margin-bottom: 0.4rem; }
+.prob-bar-container {
+  width: 100%;
+  height: 16px;
+  background: #334155;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  margin-bottom: 1.5rem;
+}
+.prob-bar-fill-a { background: var(--accent-green); height: 100%; transition: width 0.6s ease; }
+.prob-bar-fill-b { background: var(--accent-blue); height: 100%; transition: width 0.6s ease; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }
+.stat-card { background: var(--card-inner); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; text-align: center; }
+.stat-card h4 { margin: 0 0 0.4rem 0; font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; }
+.stat-card .val { font-size: 1.2rem; font-weight: bold; color: #fff; }
+.loader { text-align: center; padding: 2rem; display: none; color: var(--accent-blue); font-weight: bold; }
 
-        .header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-
-        .header h1 {
-            font-size: 2.2rem;
-            margin: 0 0 0.5rem 0;
-            background: linear-gradient(135deg, #fff 0%, var(--accent-blue) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .header p {
-            color: var(--text-muted);
-            font-size: 0.95rem;
-            margin: 0;
-        }
-
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            background: rgba(34, 197, 94, 0.1);
-            color: var(--accent-green);
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            border: 1px solid rgba(34, 197, 94, 0.3);
-            margin-top: 0.75rem;
-        }
-
-        .dot {
-            width: 8px;
-            height: 8px;
-            background-color: var(--accent-green);
-            border-radius: 50%;
-            display: inline-block;
-        }
-
-        .card {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-        }
-
-        .matchup-select-grid {
-            display: grid;
-            grid-template-columns: 1fr auto 1fr;
-            gap: 1rem;
-            align-items: center;
-        }
-
-        @media (max-width: 600px) {
-            .matchup-select-grid {
-                grid-template-columns: 1fr;
-            }
-            .vs-badge {
-                margin: 0.5rem auto;
-            }
-        }
-
-        .player-box {
-            background: var(--card-inner);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 1rem;
-        }
-
-        .player-box label {
-            display: block;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--accent-blue);
-            font-weight: bold;
-            margin-bottom: 0.5rem;
-        }
-
-        select {
-            width: 100%;
-            background: #1e293b;
-            border: 1px solid var(--border-color);
-            color: #fff;
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 1rem;
-            outline: none;
-        }
-
-        select:focus {
-            border-color: var(--accent-blue);
-        }
-
-        .vs-badge {
-            background: var(--border-color);
-            color: var(--text-muted);
-            font-weight: bold;
-            font-size: 0.9rem;
-            padding: 8px 12px;
-            border-radius: 50%;
-            text-align: center;
-        }
-
-        .btn-predict {
-            width: 100%;
-            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
-            color: #000;
-            font-size: 1.1rem;
-            font-weight: bold;
-            border: none;
-            padding: 14px;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            margin-top: 1rem;
-        }
-
-        .btn-predict:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.3);
-        }
-
-        .result-container {
-            display: none;
-        }
-
-        .winner-banner {
-            background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(15, 23, 42, 0.8) 100%);
-            border: 1px solid var(--accent-green);
-            border-radius: 10px;
-            padding: 1.5rem;
-            text-align: center;
-            margin-bottom: 1.5rem;
-        }
-
-        .winner-title {
-            color: var(--accent-green);
-            font-size: 1.6rem;
-            margin: 0 0 0.5rem 0;
-        }
-
-        .prob-meter-label {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.9rem;
-            font-weight: bold;
-            margin-bottom: 0.4rem;
-        }
-
-        .prob-bar-container {
-            width: 100%;
-            height: 16px;
-            background: #334155;
-            border-radius: 10px;
-            overflow: hidden;
-            display: flex;
-            margin-bottom: 1.5rem;
-        }
-
-        .prob-bar-fill-a {
-            background: var(--accent-green);
-            height: 100%;
-            transition: width 0.6s ease;
-        }
-
-        .prob-bar-fill-b {
-            background: var(--accent-blue);
-            height: 100%;
-            transition: width 0.6s ease;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 1rem;
-        }
-
-        .stat-card {
-            background: var(--card-inner);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 1rem;
-            text-align: center;
-        }
-
-        .stat-card h4 {
-            margin: 0 0 0.4rem 0;
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-        }
-
-        .stat-card .val {
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #fff;
-        }
-
-        .loader {
-            text-align: center;
-            padding: 2rem;
-            display: none;
-            color: var(--accent-blue);
-            font-weight: bold;
-        }
-    </style>
+/* --- New: system status panel --- */
+.system-panel {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.system-panel .metric { display: flex; flex-direction: column; gap: 2px; }
+.system-panel .metric .label { text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px; }
+.system-panel .metric .value { color: var(--text-main); font-weight: bold; font-size: 0.95rem; }
+</style>
 </head>
 <body>
-
 <div class="container">
-    <div class="header">
-        <h1>🎾 2026 US Open AI Match Predictor</h1>
-        <p>Gradient Boosting Classifier • Dynamic Historical Elo • Hard Court Analytics</p>
-        <div class="status-badge"><span class="dot"></span> API Model Live</div>
+
+  <div class="header">
+    <h1>🎾 2026 US Open AI Match Predictor</h1>
+    <p>Gradient Boosting Classifier • Dynamic Historical Elo • Hard Court Analytics</p>
+    <div class="status-badge"><span class="dot"></span> API Model Live</div>
+  </div>
+
+  <!-- System status: real proof Postgres + Redis are active -->
+  <div class="card">
+    <div class="system-panel" id="systemPanel">
+      <div class="metric">
+        <span class="label">Postgres — Model Last Trained</span>
+        <span class="value" id="trainedAtVal">Loading…</span>
+      </div>
+      <div class="metric">
+        <span class="label">Redis — Cache Hits</span>
+        <span class="value" id="redisHitsVal">Loading…</span>
+      </div>
+      <div class="metric">
+        <span class="label">Redis — Cache Misses</span>
+        <span class="value" id="redisMissesVal">Loading…</span>
+      </div>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="matchup-select-grid">
+      <div class="player-box">
+        <label for="playerA">Player 1</label>
+        <select id="playerA" onchange="resetResults()">
+          <option>Loading players from backend...</option>
+        </select>
+      </div>
+      <div class="vs-badge">VS</div>
+      <div class="player-box">
+        <label for="playerB">Player 2</label>
+        <select id="playerB" onchange="resetResults()">
+          <option>Loading players from backend...</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn-predict" onclick="runPrediction()">Run Full AI Match Simulation</button>
+  </div>
+
+  <div class="loader" id="loader">
+    ⏳ Querying Gradient Boosting model & feature pipeline...
+  </div>
+
+  <div class="result-container" id="resultContainer">
+
+    <!-- Cache/latency proof badge -->
+    <div class="perf-badge" id="perfBadge"></div>
 
     <div class="card">
-        <div class="matchup-select-grid">
-            <div class="player-box">
-                <label for="playerA">Player 1</label>
-                <select id="playerA" onchange="resetResults()">
-                    <option>Loading players from backend...</option>
-                </select>
-            </div>
+      <div class="winner-banner">
+        <p style="margin: 0; color: var(--text-muted); text-transform: uppercase; font-size: 0.8rem;">Predicted Winner</p>
+        <h2 class="winner-title" id="winnerName">--</h2>
+        <span id="winConfidenceBadge" style="background: rgba(34,197,94,0.2); color: var(--accent-green); padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.9rem;">-- % Confidence</span>
+      </div>
 
-            <div class="vs-badge">VS</div>
+      <div class="prob-meter-label">
+        <span id="labelPlayerA" style="color: var(--accent-green);">Player A (0%)</span>
+        <span id="labelPlayerB" style="color: var(--accent-blue);">Player B (0%)</span>
+      </div>
+      <div class="prob-bar-container">
+        <div class="prob-bar-fill-a" id="barFillA" style="width: 50%;"></div>
+        <div class="prob-bar-fill-b" id="barFillB" style="width: 50%;"></div>
+      </div>
 
-            <div class="player-box">
-                <label for="playerB">Player 2</label>
-                <select id="playerB" onchange="resetResults()">
-                    <option>Loading players from backend...</option>
-                </select>
-            </div>
+      <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--text-main);">📊 Dynamic Analytics Breakdown</h3>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <h4 id="labelPlayerAElo">Player 1 Elo</h4>
+          <div class="val" id="playerAEloVal" style="color: var(--accent-green);">--</div>
         </div>
-
-        <button class="btn-predict" onclick="runPrediction()">Run Full AI Match Simulation</button>
-    </div>
-
-    <div class="loader" id="loader">
-        ⏳ Querying Gradient Boosting model & feature pipeline...
-    </div>
-
-    <div class="result-container" id="resultContainer">
-        <div class="card">
-            <div class="winner-banner">
-                <p style="margin: 0; color: var(--text-muted); text-transform: uppercase; font-size: 0.8rem;">Predicted Winner</p>
-                <h2 class="winner-title" id="winnerName">--</h2>
-                <span id="winConfidenceBadge" style="background: rgba(34,197,94,0.2); color: var(--accent-green); padding: 4px 12px; border-radius: 12px; font-weight: bold; font-size: 0.9rem;">-- % Confidence</span>
-            </div>
-
-            <div class="prob-meter-label">
-                <span id="labelPlayerA" style="color: var(--accent-green);">Player A (0%)</span>
-                <span id="labelPlayerB" style="color: var(--accent-blue);">Player B (0%)</span>
-            </div>
-            <div class="prob-bar-container">
-                <div class="prob-bar-fill-a" id="barFillA" style="width: 50%;"></div>
-                <div class="prob-bar-fill-b" id="barFillB" style="width: 50%;"></div>
-            </div>
-
-            <h3 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--text-main);">📊 Dynamic Analytics Breakdown</h3>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <h4 id="labelPlayerAElo">Player 1 Elo</h4>
-                    <div class="val" id="playerAEloVal" style="color: var(--accent-green);">--</div>
-                </div>
-                <div class="stat-card">
-                    <h4 id="labelPlayerBElo">Player 2 Elo</h4>
-                    <div class="val" id="playerBEloVal" style="color: var(--accent-blue);">--</div>
-                </div>
-                <div class="stat-card">
-                    <h4>Elo Difference</h4>
-                    <div class="val" id="eloDiffVal">--</div>
-                </div>
-                <div class="stat-card">
-                    <h4>Head-To-Head Record</h4>
-                    <div class="val" id="h2hVal">--</div>
-                </div>
-            </div>
-
-            <div id="featureExplanationCard" style="margin-top: 1.5rem; background: var(--card-inner); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
-                <h4 style="margin-top: 0; color: var(--accent-blue); font-size: 1rem;">💡 Why this prediction?</h4>
-                <ul id="decidingFactorsList" style="padding-left: 1.2rem; color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0; line-height: 1.6;">
-                </ul>
-            </div>
-
+        <div class="stat-card">
+          <h4 id="labelPlayerBElo">Player 2 Elo</h4>
+          <div class="val" id="playerBEloVal" style="color: var(--accent-blue);">--</div>
         </div>
+        <div class="stat-card">
+          <h4>Elo Difference</h4>
+          <div class="val" id="eloDiffVal">--</div>
+        </div>
+        <div class="stat-card">
+          <h4>Head-To-Head Record</h4>
+          <div class="val" id="h2hVal">--</div>
+        </div>
+      </div>
+
+      <div id="featureExplanationCard" style="margin-top: 1.5rem; background: var(--card-inner); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-color);">
+        <h4 style="margin-top: 0; color: var(--accent-blue); font-size: 1rem;">💡 Why this prediction?</h4>
+        <ul id="decidingFactorsList" style="padding-left: 1.2rem; color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0; line-height: 1.6;">
+        </ul>
+      </div>
     </div>
+  </div>
+
 </div>
 
 <script>
-    const API_URL = "https://two026-us-open-ml-predictor.onrender.com";
+const API_URL = "https://two026-us-open-ml-predictor.onrender.com";
 
-    async function loadPlayers() {
-        const pA = document.getElementById("playerA");
-        const pB = document.getElementById("playerB");
+async function loadPlayers() {
+  const pA = document.getElementById("playerA");
+  const pB = document.getElementById("playerB");
+  try {
+    const res = await fetch(`${API_URL}/players`);
+    if (!res.ok) throw new Error("Backend offline");
+    const data = await res.json();
+    pA.innerHTML = "";
+    pB.innerHTML = "";
+    data.players.forEach((player, idx) => {
+      pA.add(new Option(player, player, false, idx === 0));
+      pB.add(new Option(player, player, false, idx === 1));
+    });
+  } catch (e) {
+    pA.innerHTML = "<option>Server waking up... Try refreshing in 30s</option>";
+    pB.innerHTML = "<option>Server waking up... Try refreshing in 30s</option>";
+  }
+}
 
-        try {
-            const res = await fetch(`${API_URL}/players`);
-            if (!res.ok) throw new Error("Backend offline");
+async function loadSystemStatus() {
+  try {
+    const res = await fetch(`${API_URL}/system-status`);
+    if (!res.ok) throw new Error("status unavailable");
+    const data = await res.json();
 
-            const data = await res.json();
-            
-            pA.innerHTML = "";
-            pB.innerHTML = "";
+    document.getElementById("trainedAtVal").innerText = data.postgres_last_trained_at
+      ? new Date(data.postgres_last_trained_at).toLocaleString()
+      : "No snapshot yet";
 
-            data.players.forEach((player, idx) => {
-                pA.add(new Option(player, player, false, idx === 0));
-                pB.add(new Option(player, player, false, idx === 1));
-            });
-        } catch (e) {
-            pA.innerHTML = "<option>Server waking up... Try refreshing in 30s</option>";
-            pB.innerHTML = "<option>Server waking up... Try refreshing in 30s</option>";
-        }
+    const stats = data.redis_stats || {};
+    const totalHits = (stats.predict_hits || 0) + (stats.players_hits || 0);
+    const totalMisses = (stats.predict_misses || 0) + (stats.players_misses || 0);
+    document.getElementById("redisHitsVal").innerText = totalHits;
+    document.getElementById("redisMissesVal").innerText = totalMisses;
+  } catch (e) {
+    document.getElementById("trainedAtVal").innerText = "Unavailable";
+    document.getElementById("redisHitsVal").innerText = "Unavailable";
+    document.getElementById("redisMissesVal").innerText = "Unavailable";
+  }
+}
+
+async function runPrediction() {
+  const pA_name = document.getElementById("playerA").value;
+  const pB_name = document.getElementById("playerB").value;
+
+  if (pA_name === pB_name) {
+    alert("Please select two different players for the matchup!");
+    return;
+  }
+
+  document.getElementById("loader").style.display = "block";
+  document.getElementById("resultContainer").style.display = "none";
+
+  // Client-side stopwatch — measures total round-trip time, so it's real
+  // and visible evidence of the caching layer regardless of what the
+  // backend reports, network included.
+  const clientStart = performance.now();
+
+  try {
+    const res = await fetch(`${API_URL}/predict`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pA_name, pB_name })
+    });
+    if (!res.ok) throw new Error("Prediction request failed");
+    const data = await res.json();
+    const clientMs = Math.round(performance.now() - clientStart);
+
+    // --- Perf badge: this is the actual visible proof ---
+    const perfBadge = document.getElementById("perfBadge");
+    const wasCached = data.cached === true;
+    perfBadge.className = "perf-badge " + (wasCached ? "hit" : "miss");
+    const serverMs = data.response_time_ms !== undefined ? `${data.response_time_ms}ms server` : "";
+    perfBadge.innerHTML = wasCached
+      ? `⚡ Served from Redis cache <span class="sep">|</span> ${clientMs}ms round-trip <span class="sep">|</span> ${serverMs}`
+      : `🔄 Computed fresh (Postgres-backed model) <span class="sep">|</span> ${clientMs}ms round-trip <span class="sep">|</span> ${serverMs}`;
+
+    document.getElementById("winnerName").innerText = `🏆 ${data.winner}`;
+    document.getElementById("winConfidenceBadge").innerText = `${data.confidence}% Win Probability`;
+
+    let probA = data.winner === pA_name ? data.confidence : (100 - data.confidence).toFixed(1);
+    let probB = (100 - probA).toFixed(1);
+    document.getElementById("labelPlayerA").innerText = `${pA_name} (${probA}%)`;
+    document.getElementById("labelPlayerB").innerText = `${pB_name} (${probB}%)`;
+    document.getElementById("barFillA").style.width = `${probA}%`;
+    document.getElementById("barFillB").style.width = `${probB}%`;
+
+    const breakdown = data.matchup_breakdown || {};
+
+    if (breakdown.pA_elo !== undefined && breakdown.pB_elo !== undefined) {
+      document.getElementById("labelPlayerAElo").innerText = `${pA_name} Elo`;
+      document.getElementById("labelPlayerBElo").innerText = `${pB_name} Elo`;
+      document.getElementById("playerAEloVal").innerText = `${breakdown.pA_elo}`;
+      document.getElementById("playerBEloVal").innerText = `${breakdown.pB_elo}`;
+    } else {
+      document.getElementById("playerAEloVal").innerText = "N/A";
+      document.getElementById("playerBEloVal").innerText = "N/A";
     }
 
-    async function runPrediction() {
-        const pA_name = document.getElementById("playerA").value;
-        const pB_name = document.getElementById("playerB").value;
-
-        if (pA_name === pB_name) {
-            alert("Please select two different players for the matchup!");
-            return;
-        }
-
-        document.getElementById("loader").style.display = "block";
-        document.getElementById("resultContainer").style.display = "none";
-
-        try {
-            const res = await fetch(`${API_URL}/predict`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ pA_name, pB_name })
-            });
-
-            if (!res.ok) throw new Error("Prediction request failed");
-
-            const data = await res.json();
-            
-            document.getElementById("winnerName").innerText = `🏆 ${data.winner}`;
-            document.getElementById("winConfidenceBadge").innerText = `${data.confidence}% Win Probability`;
-
-            let probA = data.winner === pA_name ? data.confidence : (100 - data.confidence).toFixed(1);
-            let probB = (100 - probA).toFixed(1);
-
-            document.getElementById("labelPlayerA").innerText = `${pA_name} (${probA}%)`;
-            document.getElementById("labelPlayerB").innerText = `${pB_name} (${probB}%)`;
-            document.getElementById("barFillA").style.width = `${probA}%`;
-            document.getElementById("barFillB").style.width = `${probB}%`;
-
-            const breakdown = data.matchup_breakdown || {};
-
-            // Display Individual Dynamic Elo Ratings
-            if (breakdown.pA_elo !== undefined && breakdown.pB_elo !== undefined) {
-                document.getElementById("labelPlayerAElo").innerText = `${pA_name} Elo`;
-                document.getElementById("labelPlayerBElo").innerText = `${pB_name} Elo`;
-                document.getElementById("playerAEloVal").innerText = `${breakdown.pA_elo}`;
-                document.getElementById("playerBEloVal").innerText = `${breakdown.pB_elo}`;
-            } else {
-                document.getElementById("playerAEloVal").innerText = "N/A";
-                document.getElementById("playerBEloVal").innerText = "N/A";
-            }
-            
-            // Display Head-To-Head Record
-            if (breakdown.pA_h2h_wins !== undefined && breakdown.pB_h2h_wins !== undefined) {
-                document.getElementById("h2hVal").innerText = `${breakdown.pA_h2h_wins} - ${breakdown.pB_h2h_wins}`;
-            } else {
-                document.getElementById("h2hVal").innerText = "0 - 0";
-            }
-
-            // Display Net Elo Difference
-            if (data.elo_diff !== undefined) {
-                document.getElementById("eloDiffVal").innerText = `${data.elo_diff > 0 ? '+' : ''}${data.elo_diff} Elo`;
-            } else {
-                document.getElementById("eloDiffVal").innerText = "N/A";
-            }
-
-            // Display Deciding Factors
-            const factorsList = document.getElementById("decidingFactorsList");
-            if (factorsList && breakdown.deciding_factors) {
-                factorsList.innerHTML = breakdown.deciding_factors
-                    .map(factor => `<li>${factor}</li>`)
-                    .join("");
-            } else if (factorsList) {
-                factorsList.innerHTML = "<li>Historical Elo ratings and hard court baseline analysis</li>";
-            }
-
-            document.getElementById("loader").style.display = "none";
-            document.getElementById("resultContainer").style.display = "block";
-
-        } catch (err) {
-            document.getElementById("loader").innerText = "❌ Connection timeout or waking up free-tier server. Please retry in 20 seconds.";
-        }
+    if (breakdown.pA_h2h_wins !== undefined && breakdown.pB_h2h_wins !== undefined) {
+      document.getElementById("h2hVal").innerText = `${breakdown.pA_h2h_wins} - ${breakdown.pB_h2h_wins}`;
+    } else {
+      document.getElementById("h2hVal").innerText = "0 - 0";
     }
 
-    function resetResults() {
-        document.getElementById("resultContainer").style.display = "none";
+    if (data.elo_diff !== undefined) {
+      document.getElementById("eloDiffVal").innerText = `${data.elo_diff > 0 ? '+' : ''}${data.elo_diff} Elo`;
+    } else {
+      document.getElementById("eloDiffVal").innerText = "N/A";
     }
 
-    window.onload = loadPlayers;
+    const factorsList = document.getElementById("decidingFactorsList");
+    if (factorsList && breakdown.deciding_factors) {
+      factorsList.innerHTML = breakdown.deciding_factors
+        .map(factor => `<li>${factor}</li>`)
+        .join("");
+    } else if (factorsList) {
+      factorsList.innerHTML = "<li>Historical Elo ratings and hard court baseline analysis</li>";
+    }
+
+    document.getElementById("loader").style.display = "none";
+    document.getElementById("resultContainer").style.display = "block";
+
+    // Refresh the hit/miss counters so the panel updates live too.
+    loadSystemStatus();
+
+  } catch (err) {
+    document.getElementById("loader").innerText = "❌ Connection timeout or waking up free-tier server. Please retry in 20 seconds.";
+  }
+}
+
+function resetResults() {
+  document.getElementById("resultContainer").style.display = "none";
+}
+
+window.onload = () => {
+  loadPlayers();
+  loadSystemStatus();
+};
 </script>
-
 </body>
 </html>
