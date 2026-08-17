@@ -3,33 +3,36 @@ PostgreSQL layer: connection pooling + persistence for trained artifacts
 (elo_ratings, player_stats, h2h_tracker) so a cold start can skip
 re-downloading and re-training against 4 years of ATP CSVs.
 
-Uses asyncpg directly (no ORM) since the access pattern here is a handful
-of bulk upserts on startup + bulk reads on cold start — an ORM would just
-add overhead for no benefit.
+Uses psycopg (v3) with psycopg_pool instead of asyncpg — asyncpg ships no
+prebuilt wheel for newer Python versions (e.g. 3.14) and fails to compile
+from source on some toolchains. psycopg3 has prebuilt wheels via the
+`psycopg[binary]` extra and an equivalent async pooled API.
 """
 
 import json
 import os
 
-import asyncpg
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
-DATABASE_URL = os.environ["DATABASE_URL"]  # postgres://user:pass@host:port/db
+DATABASE_URL = os.environ["DATABASE_URL"]  # postgresql://user:pass@host:port/db
 
 # Tune pool size to your Render/Postgres plan. min_size keeps warm connections
 # ready so the first request after idle doesn't pay a connection-setup cost.
-_pool: asyncpg.Pool | None = None
+_pool: AsyncConnectionPool | None = None
 
 
-async def init_pool() -> asyncpg.Pool:
+async def init_pool() -> AsyncConnectionPool:
     global _pool
     if _pool is None:
-        _pool = await asyncpg.create_pool(
-            dsn=DATABASE_URL,
+        _pool = AsyncConnectionPool(
+            conninfo=DATABASE_URL,
             min_size=2,
             max_size=10,
-            max_inactive_connection_lifetime=300,
-            command_timeout=10,
+            timeout=10,
+            open=False,
         )
+        await _pool.open(wait=True)
         await _ensure_schema(_pool)
     return _pool
 
@@ -41,14 +44,14 @@ async def close_pool() -> None:
         _pool = None
 
 
-def get_pool() -> asyncpg.Pool:
+def get_pool() -> AsyncConnectionPool:
     if _pool is None:
         raise RuntimeError("DB pool not initialized — call init_pool() on startup")
     return _pool
 
 
-async def _ensure_schema(pool: asyncpg.Pool) -> None:
-    async with pool.acquire() as conn:
+async def _ensure_schema(pool: AsyncConnectionPool) -> None:
+    async with pool.connection() as conn:
         await conn.execute(
             """
             CREATE TABLE IF NOT EXISTS model_artifacts (
@@ -72,11 +75,11 @@ async def save_artifacts(
     # h2h_tracker keys are tuples (player_a, player_b) — JSON needs string keys
     h2h_serializable = {f"{a}||{b}": v for (a, b), v in h2h_tracker.items()}
 
-    async with pool.acquire() as conn:
+    async with pool.connection() as conn:
         await conn.execute(
             """
             INSERT INTO model_artifacts (id, elo_ratings, player_stats, h2h_tracker, player_list, trained_at)
-            VALUES (1, $1, $2, $3, $4, now())
+            VALUES (1, %s, %s, %s, %s, now())
             ON CONFLICT (id) DO UPDATE SET
                 elo_ratings = EXCLUDED.elo_ratings,
                 player_stats = EXCLUDED.player_stats,
@@ -84,10 +87,12 @@ async def save_artifacts(
                 player_list = EXCLUDED.player_list,
                 trained_at = EXCLUDED.trained_at;
             """,
-            json.dumps(elo_ratings),
-            json.dumps(player_stats),
-            json.dumps(h2h_serializable),
-            json.dumps(player_list),
+            (
+                json.dumps(elo_ratings),
+                json.dumps(player_stats),
+                json.dumps(h2h_serializable),
+                json.dumps(player_list),
+            ),
         )
 
 
@@ -98,24 +103,29 @@ async def load_artifacts(max_age_hours: int = 24) -> dict | None:
     tune max_age_hours to how often you want to pick up new match data.
     """
     pool = get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT elo_ratings, player_stats, h2h_tracker, player_list, trained_at
-            FROM model_artifacts
-            WHERE id = 1 AND trained_at > now() - ($1 || ' hours')::interval;
-            """,
-            str(max_age_hours),
-        )
+    async with pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT elo_ratings, player_stats, h2h_tracker, player_list, trained_at
+                FROM model_artifacts
+                WHERE id = 1 AND trained_at > now() - (%s || ' hours')::interval;
+                """,
+                (str(max_age_hours),),
+            )
+            row = await cur.fetchone()
+
     if row is None:
         return None
 
-    h2h_raw = json.loads(row["h2h_tracker"])
+    # psycopg auto-adapts JSONB columns to Python dicts/lists already,
+    # so no json.loads needed here (unlike the raw-driver version).
+    h2h_raw = row["h2h_tracker"]
     h2h_tracker = {tuple(k.split("||")): v for k, v in h2h_raw.items()}
 
     return {
-        "elo_ratings": json.loads(row["elo_ratings"]),
-        "player_stats": json.loads(row["player_stats"]),
+        "elo_ratings": row["elo_ratings"],
+        "player_stats": row["player_stats"],
         "h2h_tracker": h2h_tracker,
-        "player_list": json.loads(row["player_list"]),
+        "player_list": row["player_list"],
     }
