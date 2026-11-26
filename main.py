@@ -1,169 +1,75 @@
-from contextlib import asynccontextmanager
+import asyncio
 import time
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
 
-import db
 import cache
+import db
+from features import FeatureBuilder, load_matches
+from model import MatchModel, add_model_columns, training_rows
 
-all_matches = None
-h2h_tracker = {}
-elo_ratings = {}
-player_stats = {}
-model = None
-player_list = []
+DATA_YEARS = range(2010, 2026)
+ROSTER_MIN_MATCHES = 10   # players shown in the picker need some history...
+ROSTER_RECENT_YEARS = 2   # ...and a match in the last two seasons of data
 
-DEFAULT_ELO = 1500
+# Everything the API needs to serve predictions; persisted to Postgres as one snapshot.
+state: dict = {}
 
 
-def _swap_matchup_fields(cached: dict, p1: str, p2: str) -> dict:
-    """
-    Cache key is order-independent (sorted pair), but the response has
-    pA/pB-labeled fields. If the caller's (p1, p2) order doesn't match
-    the order the cached payload was originally stored under, relabel
-    so pA_name always equals the caller's p1.
-    """
-    breakdown = cached["matchup_breakdown"]
-    if breakdown["pA_name"].lower() == p1.strip().lower():
-        return {**cached, "cached": True}
+def build_state() -> dict:
+    """Download match data, build leakage-free features, and fit the ensemble."""
+    matches = load_matches(DATA_YEARS)
+    builder = FeatureBuilder()
+    rows = add_model_columns(builder.process(matches, record_from_year=2014))
+    model = MatchModel().fit(training_rows(rows))
 
-    swapped = dict(cached)
-    swapped["elo_diff"] = -cached["elo_diff"]
-    swapped["h2h_diff"] = -cached["h2h_diff"]
-    swapped["cached"] = True
-    swapped["matchup_breakdown"] = {
-        **breakdown,
-        "pA_name": breakdown["pB_name"],
-        "pB_name": breakdown["pA_name"],
-        "pA_elo": breakdown["pB_elo"],
-        "pB_elo": breakdown["pA_elo"],
-        "pA_h2h_wins": breakdown["pB_h2h_wins"],
-        "pB_h2h_wins": breakdown["pA_h2h_wins"],
-        "pA_total_atp_wins": breakdown["pB_total_atp_wins"],
-        "pB_total_atp_wins": breakdown["pA_total_atp_wins"],
+    # Latest known rank / points / age per player, for hypothetical matchups.
+    info = {}
+    for side in ("winner", "loser"):
+        cols = matches[["tourney_date", f"{side}_name", f"{side}_rank",
+                        f"{side}_rank_points", f"{side}_age"]].copy()
+        cols.columns = ["date", "name", "rank", "pts", "age"]
+        for r in cols.itertuples(index=False):
+            if isinstance(r.name, str) and (r.name not in info or r.date >= info[r.name]["date"]):
+                info[r.name] = {"date": r.date, "rank": r.rank, "pts": r.pts, "age": r.age}
+
+    as_of = builder.last_date + pd.Timedelta(days=1)
+    recent_cutoff = as_of - pd.DateOffset(years=ROSTER_RECENT_YEARS)
+    roster = sorted(
+        name for name, s in builder.players.items()
+        if s.n >= ROSTER_MIN_MATCHES and s.last_date is not None and s.last_date >= recent_cutoff
+    )
+    return {
+        "model": model,
+        "builder": builder,
+        "info": info,
+        "player_list": roster,
+        "roster_set": set(roster),
+        "as_of": as_of,
+        "trained_at": datetime.now(timezone.utc).isoformat(),
     }
-    return swapped
-
-
-def train_model():
-    """Full retrain from raw ATP CSVs — only runs on a true cold cache miss."""
-    global all_matches, h2h_tracker, elo_ratings, player_stats, model, player_list
-
-    base_url = (
-        "https://raw.githubusercontent.com/Kadantte/tennis_atp/master/atp_matches_{}.csv"
-    )
-    dfs = []
-    for year in [2020, 2021, 2022, 2023]:
-        try:
-            df = pd.read_csv(base_url.format(year))
-            df["tourney_date"] = pd.to_datetime(
-                df["tourney_date"].astype(str), format="%Y%m%d"
-            )
-            dfs.append(df)
-        except Exception:
-            pass
-
-    if not dfs:
-        raise RuntimeError("Failed to load match datasets.")
-
-    all_matches = pd.concat(dfs, ignore_index=True).sort_values("tourney_date")
-
-    elo_ratings = {}
-    K = 32
-    for _, row in all_matches.iterrows():
-        w, l = row["winner_name"], row["loser_name"]
-        rw = elo_ratings.get(w, DEFAULT_ELO)
-        rl = elo_ratings.get(l, DEFAULT_ELO)
-        exp_w = 1 / (1 + 10 ** ((rl - rw) / 400))
-        exp_l = 1 - exp_w
-        elo_ratings[w] = rw + K * (1 - exp_w)
-        elo_ratings[l] = rl + K * (0 - exp_l)
-
-    winners = all_matches["winner_name"].dropna().unique()
-    losers = all_matches["loser_name"].dropna().unique()
-    player_list = sorted(list(set(winners).union(set(losers))))
-
-    player_stats = {}
-    for player in player_list:
-        wins = len(all_matches[all_matches["winner_name"] == player])
-        losses = len(all_matches[all_matches["loser_name"] == player])
-        total = wins + losses
-        win_rate = (wins / total) if total > 5 else 0.50
-        player_stats[player] = {
-            "wins": wins,
-            "losses": losses,
-            "total_matches": total,
-            "win_rate": win_rate,
-            "elo": elo_ratings.get(player, DEFAULT_ELO),
-        }
-
-    h2h_tracker = {}
-    for _, row in all_matches.iterrows():
-        w, l = row["winner_name"], row["loser_name"]
-        pair_key = tuple(sorted([w, l]))
-        if pair_key not in h2h_tracker:
-            h2h_tracker[pair_key] = {w: 1, l: 0}
-        else:
-            h2h_tracker[pair_key][w] = h2h_tracker[pair_key].get(w, 0) + 1
-
-    ml_rows = []
-    np.random.seed(42)
-    us_open_matches = all_matches[
-        all_matches["tourney_name"].str.contains("US Open", case=False, na=False)
-    ].copy()
-
-    for _, row in us_open_matches.iterrows():
-        winner, loser = row["winner_name"], row["loser_name"]
-        swap = np.random.rand() > 0.5
-        pA, pB = (loser, winner) if swap else (winner, loser)
-        target = 0 if swap else 1
-
-        elo_diff = elo_ratings.get(pA, DEFAULT_ELO) - elo_ratings.get(pB, DEFAULT_ELO)
-        pA_matches = player_stats.get(pA, {}).get("total_matches", 0)
-        pB_matches = player_stats.get(pB, {}).get("total_matches", 0)
-        exp_diff = pA_matches - pB_matches
-
-        pair_key = tuple(sorted([pA, pB]))
-        h2h_data = h2h_tracker.get(pair_key, {pA: 0, pB: 0})
-        h2h_diff = h2h_data.get(pA, 0) - h2h_data.get(pB, 0)
-
-        ml_rows.append(
-            {"elo_diff": elo_diff, "exp_diff": exp_diff, "h2h_diff": h2h_diff, "target": target}
-        )
-
-    ml_df = pd.DataFrame(ml_rows)
-    model = HistGradientBoostingClassifier(
-        random_state=42, max_iter=100, min_samples_leaf=10, l2_regularization=1.0
-    )
-    model.fit(ml_df[["elo_diff", "exp_diff", "h2h_diff"]], ml_df["target"])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global elo_ratings, player_stats, h2h_tracker, player_list, model
+    global state
 
+    # Both are optional: each logs a warning and returns False if unavailable,
+    # so a dead database or cache can't crash startup.
     await db.init_pool()
-    cache.init_redis()
+    await cache.init_redis()
 
-    cached = await db.load_artifacts(max_age_hours=24)
-    if cached is not None:
-        elo_ratings = cached["elo_ratings"]
-        player_stats = cached["player_stats"]
-        h2h_tracker = cached["h2h_tracker"]
-        player_list = cached["player_list"]
-        # Model itself isn't persisted (sklearn objects don't serialize
-        # cleanly to Postgres JSONB) — retrain is cheap relative to the
-        # CSV download + Elo/H2H pass, which is the part we skip here.
-        # If you want to skip this too, pickle the model to a bytea column.
-        train_model()
+    snapshot = await db.load_snapshot(max_age_hours=24)
+    if snapshot is not None:
+        state = snapshot          # warm start: skip download + training entirely
     else:
-        train_model()
-        await db.save_artifacts(elo_ratings, player_stats, h2h_tracker, player_list)
+        state = await asyncio.to_thread(build_state)
+        await db.save_snapshot(state)
         await cache.invalidate_all()
 
     yield
@@ -188,107 +94,147 @@ class MatchupRequest(BaseModel):
     pB_name: str
 
 
+def _swap_matchup_fields(cached: dict, p1: str) -> dict:
+    """
+    Cache key is order-independent (sorted pair), but the response has
+    pA/pB-labeled fields. If the caller's order differs from the order the
+    payload was stored under, relabel so pA_name always equals the caller's p1.
+    """
+    breakdown = cached["matchup_breakdown"]
+    if breakdown["pA_name"].lower() == p1.strip().lower():
+        return {**cached, "cached": True}
+
+    swapped = {**cached, "cached": True,
+               "elo_diff": -cached["elo_diff"], "h2h_diff": -cached["h2h_diff"]}
+    new_breakdown = dict(breakdown)
+    for field in ("name", "elo", "hard_elo", "h2h_wins", "serve_pts_won", "return_pts_won"):
+        new_breakdown[f"pA_{field}"] = breakdown[f"pB_{field}"]
+        new_breakdown[f"pB_{field}"] = breakdown[f"pA_{field}"]
+    swapped["matchup_breakdown"] = new_breakdown
+    return swapped
+
+
+def _deciding_factors(f: dict, a: str, b: str) -> list[str]:
+    out = []
+
+    def lead(diff):
+        return (a, b) if diff > 0 else (b, a)
+
+    if abs(f["elo_diff"]) > 25:
+        hi, _ = lead(f["elo_diff"])
+        out.append(f"{hi} holds a higher overall Elo rating "
+                   f"({max(f['pA_elo'], f['pB_elo']):.0f} vs {min(f['pA_elo'], f['pB_elo']):.0f})")
+    if abs(f["elo_hard_diff"]) > 25:
+        hi, _ = lead(f["elo_hard_diff"])
+        out.append(f"{hi} is rated higher on hard courts "
+                   f"({max(f['pA_elo_hard'], f['pB_elo_hard']):.0f} vs {min(f['pA_elo_hard'], f['pB_elo_hard']):.0f})")
+    if abs(f["spw_diff"]) > 0.01:
+        hi, _ = lead(f["spw_diff"])
+        out.append(f"{hi} wins more service points recently "
+                   f"({max(f['pA_spw'], f['pB_spw']):.1%} vs {min(f['pA_spw'], f['pB_spw']):.1%})")
+    if abs(f["rpw_diff"]) > 0.01:
+        hi, _ = lead(f["rpw_diff"])
+        out.append(f"{hi} wins more return points recently "
+                   f"({max(f['pA_rpw'], f['pB_rpw']):.1%} vs {min(f['pA_rpw'], f['pB_rpw']):.1%})")
+    if abs(f["form_diff"]) > 40:
+        hi, _ = lead(f["form_diff"])
+        out.append(f"{hi} is in better form (larger Elo gain over the last 3 months)")
+    if f["pA_h2h"] != f["pB_h2h"]:
+        hi, _ = lead(f["pA_h2h"] - f["pB_h2h"])
+        out.append(f"{hi} leads the head-to-head ({max(f['pA_h2h'], f['pB_h2h'])}-{min(f['pA_h2h'], f['pB_h2h'])})")
+    return out[:4] or ["Evenly matched: ratings and recent serve/return numbers are close"]
+
+
 @app.get("/")
 def health_check():
-    return {"status": "online", "players_loaded": len(player_list)}
+    return {"status": "online", "players_loaded": len(state.get("player_list", []))}
 
 
 @app.get("/system-status")
 async def system_status():
-    """Visible proof the caching/pooling layer is active — last Postgres
-    training timestamp and in-process Redis hit/miss counts since deploy."""
-    trained_at = await db.get_trained_at()
+    """Visible proof the caching/persistence layer is active."""
     return {
-        "postgres_last_trained_at": trained_at,
+        "postgres_connected": db.is_enabled(),
+        "postgres_last_trained_at": await db.get_trained_at(),
+        "model_trained_at": state.get("trained_at"),
+        "data_through": state["as_of"].date().isoformat() if state else None,
+        "redis_connected": cache.enabled,
         "redis_stats": cache.stats,
     }
 
 
 @app.get("/players")
 async def get_players():
-    if not player_list:
+    if not state.get("player_list"):
         raise HTTPException(status_code=500, detail="Player list not initialized")
 
     cached = await cache.get_cached_players()
     if cached is not None:
         return {"players": cached}
 
-    await cache.set_cached_players(player_list)
-    return {"players": player_list}
+    await cache.set_cached_players(state["player_list"])
+    return {"players": state["player_list"]}
 
 
 @app.post("/predict")
 async def predict_matchup(req: MatchupRequest):
-    if model is None:
+    if not state.get("model"):
         raise HTTPException(status_code=500, detail="Model not trained")
 
     start = time.perf_counter()
-    p1, p2 = req.pA_name, req.pB_name
+    p1, p2 = req.pA_name.strip(), req.pB_name.strip()
+    for p in (p1, p2):
+        if p not in state["roster_set"]:
+            raise HTTPException(status_code=422, detail=f"Unknown player: {p}")
+    if p1 == p2:
+        raise HTTPException(status_code=422, detail="Pick two different players")
 
     cached = await cache.get_cached_predict(p1, p2)
     if cached is not None:
-        result = _swap_matchup_fields(cached, p1, p2)
-        result["response_time_ms"] = round((time.perf_counter() - start) * 1000, 1)
+        result = _swap_matchup_fields(cached, p1)
+        result["response_time_ms"] = round((time.perf_counter() - start) * 1000, 2)
         return result
 
-    p1_stats = player_stats.get(p1, {"win_rate": 0.5, "total_matches": 0, "wins": 0})
-    p2_stats = player_stats.get(p2, {"win_rate": 0.5, "total_matches": 0, "wins": 0})
+    builder, info, as_of = state["builder"], state["info"], state["as_of"]
 
-    p1_elo = elo_ratings.get(p1, 1500)
-    p2_elo = elo_ratings.get(p2, 1500)
-    elo_diff = p1_elo - p2_elo
-    exp_diff = p1_stats["total_matches"] - p2_stats["total_matches"]
+    def years_since(d):
+        return (as_of - d).days / 365.25
 
-    pair_key = tuple(sorted([p1, p2]))
-    h2h_data = h2h_tracker.get(pair_key, {p1: 0, p2: 0})
-    p1_h2h = h2h_data.get(p1, 0)
-    p2_h2h = h2h_data.get(p2, 0)
-    h2h_diff = p1_h2h - p2_h2h
-
-    feats = pd.DataFrame(
-        [[elo_diff, exp_diff, h2h_diff]], columns=["elo_diff", "exp_diff", "h2h_diff"]
+    ia, ib = info.get(p1, {}), info.get(p2, {})
+    f = builder.matchup_features(
+        p1, p2, date=as_of, tourney_id=None,
+        a_rank=ia.get("rank"), b_rank=ib.get("rank"),
+        a_pts=ia.get("pts"), b_pts=ib.get("pts"),
+        a_age=(ia["age"] + years_since(ia["date"])) if ia else None,
+        b_age=(ib["age"] + years_since(ib["date"])) if ib else None,
     )
-    raw_prob = float(model.predict_proba(feats)[0][1])
-    clipped_prob = np.clip(raw_prob, 0.12, 0.88)
-    winner = p1 if clipped_prob >= 0.5 else p2
-    confidence = clipped_prob if clipped_prob >= 0.5 else (1 - clipped_prob)
-
-    deciding_factors = []
-    if abs(elo_diff) > 25:
-        higher_elo = p1 if elo_diff > 0 else p2
-        deciding_factors.append(
-            f"{higher_elo} holds a higher overall Elo rating ({max(p1_elo, p2_elo):.0f} vs {min(p1_elo, p2_elo):.0f})"
-        )
-    if p1_h2h != p2_h2h:
-        leader = p1 if p1_h2h > p2_h2h else p2
-        deciding_factors.append(
-            f"{leader} leads the Head-to-Head series ({max(p1_h2h, p2_h2h)}-{min(p1_h2h, p2_h2h)})"
-        )
-    if abs(exp_diff) > 15:
-        more_exp = p1 if exp_diff > 0 else p2
-        deciding_factors.append(f"{more_exp} has significantly higher ATP Tour match density")
-    if not deciding_factors:
-        deciding_factors.append("Even matchup: Decision based on subtle hard-court momentum differentials")
+    row = add_model_columns(pd.DataFrame([{**f, "best_of": 5}]))  # US Open men's = best of 5
+    p_a = float(state["model"].predict_proba(row)[0])
+    winner = p1 if p_a >= 0.5 else p2
 
     result = {
         "winner": winner,
-        "confidence": round(confidence * 100, 1),
-        "elo_diff": round(elo_diff, 1),
-        "h2h_diff": h2h_diff,
+        "confidence": round(max(p_a, 1 - p_a) * 100, 1),
+        "elo_diff": round(f["elo_diff"], 1),
+        "h2h_diff": int(f["h2h_diff"]),
         "cached": False,
         "matchup_breakdown": {
             "pA_name": p1,
             "pB_name": p2,
-            "pA_elo": round(p1_elo, 1),
-            "pB_elo": round(p2_elo, 1),
-            "pA_h2h_wins": p1_h2h,
-            "pB_h2h_wins": p2_h2h,
-            "pA_total_atp_wins": p1_stats["wins"],
-            "pB_total_atp_wins": p2_stats["wins"],
-            "deciding_factors": deciding_factors,
+            "pA_elo": round(f["pA_elo"], 1),
+            "pB_elo": round(f["pB_elo"], 1),
+            "pA_hard_elo": round(f["pA_elo_hard"], 1),
+            "pB_hard_elo": round(f["pB_elo_hard"], 1),
+            "pA_h2h_wins": int(f["pA_h2h"]),
+            "pB_h2h_wins": int(f["pB_h2h"]),
+            "pA_serve_pts_won": round(f["pA_spw"], 3),
+            "pB_serve_pts_won": round(f["pB_spw"], 3),
+            "pA_return_pts_won": round(f["pA_rpw"], 3),
+            "pB_return_pts_won": round(f["pB_rpw"], 3),
+            "deciding_factors": _deciding_factors(f, p1, p2),
         },
     }
 
     await cache.set_cached_predict(p1, p2, result)
-    result["response_time_ms"] = round((time.perf_counter() - start) * 1000, 1)
+    result["response_time_ms"] = round((time.perf_counter() - start) * 1000, 2)
     return result
