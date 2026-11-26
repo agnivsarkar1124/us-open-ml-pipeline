@@ -137,6 +137,11 @@ def verify(report: dict, tool_outputs: list[dict], question: str) -> dict:
         if f["source"] not in called:
             problems.append(f"key_factors[{i}] cites {f['source']}, which was never called")
 
+    # 4. Free-text fields must actually be filled in (an empty string passes schema validation)
+    for field in ("upset_path", "summary"):
+        if len(report.get(field, "").strip()) < 20:
+            problems.append(f"{field} is empty or too short; write at least one full sentence")
+
     n_numbers = sum(len(extract_numbers(t)) for _, t in report_text_fields(report))
     return {
         "passed": not problems,

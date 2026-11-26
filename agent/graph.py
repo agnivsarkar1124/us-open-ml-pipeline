@@ -83,7 +83,10 @@ def default_llm():
         return ChatOllama(
             model=os.environ.get("SCOUT_MODEL", "qwen3:8b"),
             temperature=0,
-            num_ctx=16384,  # room for tool outputs; Ollama's default context is small
+            # Thinking models (e.g. qwen3) otherwise write long hidden reasoning before
+            # every reply, which is most of the latency on a laptop. SCOUT_THINK=1 re-enables.
+            reasoning=os.environ.get("SCOUT_THINK", "0") == "1",
+            num_ctx=int(os.environ.get("SCOUT_NUM_CTX", "8192")),  # fits tool outputs; smaller = faster
             base_url=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
         )
     from langchain_anthropic import ChatAnthropic

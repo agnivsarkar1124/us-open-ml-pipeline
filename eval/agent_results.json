@@ -1,0 +1,40 @@
+{
+  "model": "ollama:qwen3:8b",
+  "questions": 12,
+  "errors": 0,
+  "verified_rate": 0.917,
+  "first_try_rate": 0.833,
+  "ungrounded_number_rate": 0.0058,
+  "numbers_checked": 171,
+  "tool_recall": 0.833,
+  "entity_accuracy": 0.917,
+  "latency_mean_s": 33.86,
+  "latency_p95_s": 42.82,
+  "tokens_mean": 5043,
+  "by_category": {
+    "who_wins": {
+      "n": 2,
+      "verified_rate": 1.0
+    },
+    "serve_return": {
+      "n": 2,
+      "verified_rate": 1.0
+    },
+    "head_to_head": {
+      "n": 2,
+      "verified_rate": 1.0
+    },
+    "messy_names": {
+      "n": 2,
+      "verified_rate": 1.0
+    },
+    "form": {
+      "n": 2,
+      "verified_rate": 0.5
+    },
+    "unanswerable": {
+      "n": 2,
+      "verified_rate": 1.0
+    }
+  }
+}

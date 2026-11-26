@@ -9,7 +9,7 @@ Runs the scouting agent over evals/questions.jsonl and reports:
   * latency and tokens    mean and p95 per question
 
     export ANTHROPIC_API_KEY=...
-    python -m evals.run_eval --api-url http://127.0.0.1:8000 [--limit 10] [--model claude-haiku-5-5]
+    python -m evals.run_eval --api-url http://127.0.0.1:8000 [--limit 10 | --per-category 2] [--model claude-haiku-5-5]
     python -m evals.run_eval --provider ollama --model qwen3:8b      # free, local
 """
 
@@ -95,7 +95,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--api-url", default=os.environ.get("US_OPEN_API_URL", "http://127.0.0.1:8000"))
     ap.add_argument("--questions", default="evals/questions.jsonl")
-    ap.add_argument("--limit", type=int)
+    ap.add_argument("--limit", type=int, help="first N questions")
+    ap.add_argument("--per-category", type=int, help="first N questions from EACH category (stratified sample)")
     ap.add_argument("--provider", default=os.environ.get("SCOUT_PROVIDER", "anthropic"),
                     choices=["anthropic", "ollama"])
     ap.add_argument("--model", default=os.environ.get("SCOUT_MODEL"))
@@ -108,6 +109,11 @@ def main():
     set_client(httpx.Client(base_url=args.api_url, timeout=120))
     graph = build_graph()
     questions = [json.loads(l) for l in Path(args.questions).read_text().splitlines() if l.strip()]
+    if args.per_category:
+        seen = {}
+        questions = [q for q in questions
+                     if seen.setdefault(q["category"], 0) < args.per_category
+                     and not seen.__setitem__(q["category"], seen[q["category"]] + 1)]
     questions = questions[: args.limit] if args.limit else questions
 
     rows = []

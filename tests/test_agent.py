@@ -192,3 +192,18 @@ def test_signed_gap_between_profiles():
     A = allowed_numbers(both, "")
     assert _matches("47.7", A)       # +35.3 vs -12.4 form gap
     assert not _matches("22.9", A)   # the wrong gap from subtracting absolute values
+
+
+def test_empty_upset_path_triggers_retry():
+    r = run(report(upset_path=""), report())
+    assert r["status"] == "verified" and r["attempts"] == 2
+
+
+def test_per_category_sampling():
+    import json
+    from pathlib import Path
+    qs = [json.loads(l) for l in Path("evals/questions.jsonl").read_text().splitlines() if l.strip()]
+    seen = {}
+    picked = [q for q in qs if seen.setdefault(q["category"], 0) < 2
+              and not seen.__setitem__(q["category"], seen[q["category"]] + 1)]
+    assert len(picked) == 12 and len({q["category"] for q in picked}) == 6
