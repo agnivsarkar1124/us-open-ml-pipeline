@@ -176,6 +176,62 @@ async def get_players():
     return {"players": state["player_list"]}
 
 
+def _require_player(name: str) -> str:
+    name = name.strip()
+    if name not in state.get("roster_set", set()):
+        raise HTTPException(status_code=404, detail=f"Unknown player: {name}")
+    return name
+
+
+def _current_info(name: str) -> dict:
+    """Latest rank / points, and age advanced to the model's as-of date."""
+    info, as_of = state["info"].get(name, {}), state["as_of"]
+    if not info:
+        return {"rank": None, "pts": None, "age": None}
+    age = info["age"] + (as_of - info["date"]).days / 365.25 if pd.notna(info["age"]) else None
+    return {"rank": info["rank"], "pts": info["pts"], "age": age}
+
+
+def _clean(x, digits=1):
+    return None if x is None or pd.isna(x) else round(float(x), digits)
+
+
+@app.get("/players/{name}/profile")
+def player_profile(name: str):
+    """Pre-match snapshot of one player as of the end of the data."""
+    name = _require_player(name)
+    s = state["builder"].players[name]
+    cur = _current_info(name)
+    snap = state["builder"]._player_snapshot(
+        name, state["as_of"], None, cur["rank"], cur["pts"], cur["age"]
+    )
+    return {
+        "name": name,
+        "data_through": state["as_of"].date().isoformat(),
+        "elo": _clean(s.elo),
+        "hard_court_elo": _clean(s.elo_hard),
+        "atp_rank": None if cur["rank"] is None or pd.isna(cur["rank"]) else int(cur["rank"]),
+        "ranking_points": None if cur["pts"] is None or pd.isna(cur["pts"]) else int(cur["pts"]),
+        "age": _clean(cur["age"]),
+        "serve_points_won_pct": _clean(s.spw * 100),
+        "return_points_won_pct": _clean(s.rpw * 100),
+        "elo_change_last_90_days": _clean(snap["form"]),
+        "wins_in_last_10": int(sum(s.results)),
+        "career_matches_in_data": s.n,
+        "hard_court_matches_in_data": s.n_hard,
+        "last_match_date": s.last_date.date().isoformat() if s.last_date is not None else None,
+    }
+
+
+@app.get("/h2h")
+def head_to_head(p1: str, p2: str):
+    """Head-to-head record between two players in the data."""
+    p1, p2 = _require_player(p1), _require_player(p2)
+    rec = state["builder"].h2h.get(tuple(sorted([p1, p2])), {})
+    return {"p1": p1, "p2": p2, "p1_wins": rec.get(p1, 0), "p2_wins": rec.get(p2, 0),
+            "total_matches": rec.get(p1, 0) + rec.get(p2, 0)}
+
+
 @app.post("/predict")
 async def predict_matchup(req: MatchupRequest):
     if not state.get("model"):
