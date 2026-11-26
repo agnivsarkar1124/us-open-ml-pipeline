@@ -1,0 +1,7 @@
+# Scouting agent (not needed by the API server on Render)
+langgraph>=1.2,<2
+langchain-core>=1.8,<2
+langchain-anthropic>=1.7,<2
+langchain-ollama>=1.2,<2   # optional: free local models
+httpx>=0.28
+pytest>=8

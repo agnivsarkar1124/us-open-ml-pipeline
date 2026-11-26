@@ -26,6 +26,10 @@ Under the hood, it replays 16 seasons of ATP results (2010–2025, about 45k mat
 * **Redis caching:** order-independent cache keys with async pooling, **0.19 ms cached vs 8.4 ms uncached** median server time (measured locally).
 * **PostgreSQL model snapshots:** warm starts load the trained model in about 0.1 s instead of retraining (about 11 s).
 * **Fault-tolerant:** the API keeps serving if Redis or Postgres goes down.
+<<<<<<< HEAD
+=======
+* **LangGraph scouting agent:** an LLM answers matchup questions by calling the model's API as tools, and every number in its report is checked against the tool outputs by deterministic code, with an automatic retry if anything doesn't match.
+>>>>>>> f02d99c (Add LangGraph scouting agent)
 
 ---
 
@@ -50,6 +54,7 @@ Reproduce with `python evaluate.py`. Full metrics are in [`eval/results.json`](e
 
 ---
 
+<<<<<<< HEAD
 ## Features
 
 All features are Player A minus Player B, computed from matches before the one being predicted:
@@ -99,6 +104,87 @@ Training data is augmented with both player orders, and predictions average both
 | `POST /predict` | Win probability and breakdown for a matchup |
 | `GET /system-status` | Cache stats, database status, data freshness |
 
+=======
+## Scouting Agent
+
+Ask a question in plain English and get a structured scouting report backed by the model:
+
+```bash
+python -m agent "cobolli vs hurkacz at flushing meadows, who's the pick?"
+```
+
+```text
+   START → agent ──(tool calls)──► tools ─┐      tools: search_players · predict_match
+             ▲                            │             player_profile · head_to_head
+             └────────────────────────────┘
+             │ (enough evidence)
+             ▼
+        write_report ──► verify ──(pass)──► END
+             ▲             │
+             └──(fail, ≤3)─┘   feedback lists each ungrounded claim
+```
+
+* **Built with LangGraph and LangChain:** the agent node is an LLM (Claude, or a free local model via Ollama) with the API tools bound, `write_report` produces a Pydantic-validated `ScoutingReport`, and `verify` is plain Python.
+* **Grounding check (no LLM grading itself):** every number in the report must appear in a tool output or be a like-for-like difference (e.g. an Elo gap). The predicted winner and probability must match `predict_match` exactly, and each claim must cite a tool that was actually called. A report that still fails after 3 attempts comes back marked `unverified`, never silently.
+* **Evaluated:** `evals/` holds 50 fixed questions in six categories, including misspelled names and questions asking for data the tools don't have. `python -m evals.run_eval` reports verified rate, first-try rate, ungrounded-number rate, tool recall, entity accuracy, latency and tokens.
+* **Tested in CI:** 15 tests run on every push with a scripted model and a mocked API, so they need no API key.
+
+---
+
+## Features
+
+All features are Player A minus Player B, computed from matches before the one being predicted:
+
+| Feature | Description |
+|---|---|
+| Elo | Dynamic-K Elo (K shrinks as a player's match count grows) |
+| Hard-court Elo | Separate Elo using only hard-court matches |
+| Serve / return | Exponentially weighted % of serve and return points won |
+| Form | Elo change over the last 3 months; win rate over the last 10 matches |
+| Ranking | Log ATP rank and ranking points |
+| Context | Rest days, minutes already played in the tournament, experience, age, head-to-head |
+
+Training data is augmented with both player orders, and predictions average both orders, so output never depends on which player is listed first.
+
+---
+
+## Architecture
+
+```text
+   GitHub Pages frontend (HTML / CSS / JS)     LangGraph scouting agent (Claude)
+                  │  REST                                  │  tool calls over REST
+                  ▼                                        ▼
+   FastAPI on Render ── features.py → model.py (LogReg + GBM ensemble)
+          │                         │
+          ▼                         ▼
+   Redis (response cache)    PostgreSQL (trained model snapshot)
+```
+
+| File | Role |
+|---|---|
+| `features.py` | Chronological, leakage-free feature builder |
+| `model.py` | Ensemble model, shared by training, serving and evaluation |
+| `evaluate.py` | Backtest, baselines, bootstrap CIs, calibration plot |
+| `main.py` | FastAPI app (predictions, player profiles, head-to-head) |
+| `agent/` | LangGraph scouting agent: tools, graph, report schema, grounding checks |
+| `evals/` | 50-question agent eval set and runner |
+| `cache.py` / `db.py` | Redis cache and Postgres snapshot layers |
+
+---
+
+## API
+
+**Base URL:** `https://two026-us-open-ml-predictor.onrender.com`
+
+| Endpoint | Description |
+|---|---|
+| `GET /players` | Active players with enough match history |
+| `POST /predict` | Win probability and breakdown for a matchup |
+| `GET /players/{name}/profile` | Ratings, rank, serve/return stats and recent form for one player |
+| `GET /h2h?p1=&p2=` | Head-to-head record |
+| `GET /system-status` | Cache stats, database status, data freshness |
+
+>>>>>>> f02d99c (Add LangGraph scouting agent)
 ```json
 // POST /predict
 { "pA_name": "Jannik Sinner", "pB_name": "Carlos Alcaraz" }
@@ -140,6 +226,17 @@ uvicorn main:app --reload        # http://127.0.0.1:8000/docs
 
 pip install -r requirements-dev.txt
 python evaluate.py               # reproduce the backtest
+<<<<<<< HEAD
+=======
+
+# scouting agent
+pip install -r requirements-agent.txt
+export ANTHROPIC_API_KEY=...     # US_OPEN_API_URL defaults to the deployed API
+python -m agent "Who wins Sinner vs Alcaraz at the US Open, and why?"
+SCOUT_PROVIDER=ollama python -m agent "..."   # or free, with a local model via Ollama
+python -m evals.run_eval --api-url http://127.0.0.1:8000
+pytest -q                        # no API key needed
+>>>>>>> f02d99c (Add LangGraph scouting agent)
 ```
 
 ---
@@ -150,6 +247,11 @@ python evaluate.py               # reproduce the backtest
 - [x] Leakage-free backtest against Elo baselines
 - [x] Serve/return, surface and form features
 - [x] Redis caching + PostgreSQL model snapshots
+<<<<<<< HEAD
+=======
+- [x] LangGraph scouting agent with grounding checks and evals
+- [ ] MCP server exposing the model as tools
+>>>>>>> f02d99c (Add LangGraph scouting agent)
 - [ ] 128-player bracket simulator for the official 2026 draw
 
 ---
