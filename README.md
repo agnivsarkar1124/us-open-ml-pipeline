@@ -127,7 +127,17 @@ python -m agent "cobolli vs hurkacz at flushing meadows, who's the pick?"
 * **Built with LangGraph and LangChain:** the agent node is an LLM (Claude, or a free local model via Ollama) with the API tools bound, `write_report` produces a Pydantic-validated `ScoutingReport`, and `verify` is plain Python.
 * **Grounding check (no LLM grading itself):** every number in the report must appear in a tool output or be a like-for-like difference (e.g. an Elo gap). The predicted winner and probability must match `predict_match` exactly, and each claim must cite a tool that was actually called. A report that still fails after 3 attempts comes back marked `unverified`, never silently.
 * **Evaluated:** `evals/` holds 50 fixed questions in six categories, including misspelled names and questions asking for data the tools don't have. `python -m evals.run_eval` reports verified rate, first-try rate, ungrounded-number rate, tool recall, entity accuracy, latency and tokens.
-* **Tested in CI:** 15 tests run on every push with a scripted model and a mocked API, so they need no API key.
+* **Results (50 questions, local Qwen3-8B via Ollama):**
+
+  | Metric | Result |
+  |---|---|
+  | Fully verified reports | **90%** (84% on first attempt; retries recovered 3) |
+  | Correct players identified | **96%**, including misspelled names |
+  | Untraceable numbers in final answers | **0.9%** (6 of 680) |
+  | Mean latency per question | 36 s on a laptop |
+
+  Every category scored 90–100% except "form" questions (2/5 verified), the next area to improve. Full results: [`eval/agent_results.json`](eval/agent_results.json).
+* **Tested in CI:** 19 tests run on every push with a scripted model and a mocked API, so they need no API key.
 
 ---
 
