@@ -152,7 +152,7 @@ def test_schema_failure_counts_as_failed_attempt():
 
 def test_unknown_player_returns_error_to_model_not_crash():
     script = [AIMessage(content="", tool_calls=[call("player_profile", {"name": "Nobody"}, 1)]),
-              AIMessage(content="done")]
+              AIMessage(content="done"), AIMessage(content="done"), AIMessage(content="done")]  # + 2 nudges
     g = build_graph(llm=ScriptedChat(script=script), report_llm=scripted_reports(report()))
     r = scout("Who is Nobody?", graph=g)
     assert "error" in r["tool_outputs"][0]["output"]
@@ -207,3 +207,29 @@ def test_per_category_sampling():
     picked = [q for q in qs if seen.setdefault(q["category"], 0) < 2
               and not seen.__setitem__(q["category"], seen[q["category"]] + 1)]
     assert len(picked) == 12 and len({q["category"] for q in picked}) == 6
+
+
+def test_agent_that_skips_predict_is_sent_back_for_it():
+    """Regression for eval form_01: the model fetched profiles but never called predict_match."""
+    script = [
+        AIMessage(content="", tool_calls=[call("player_profile", {"name": "Jannik Sinner"}, 1),
+                                          call("player_profile", {"name": "Carlos Alcaraz"}, 2)]),
+        AIMessage(content="Done, Sinner is in better form."),          # tries to stop early
+        AIMessage(content="", tool_calls=[call("predict_match", {"player_a": "Jannik Sinner",
+                                                                 "player_b": "Carlos Alcaraz"}, 3)]),
+        AIMessage(content="Now I have the prediction."),
+    ]
+    rep = report(key_factors=[{"claim": "Sinner's hard-court Elo is 2327 vs 2171", "source": "player_profile"},
+                              {"claim": "The model gives Sinner 55%", "source": "predict_match"}])
+    g = build_graph(llm=ScriptedChat(script=script), report_llm=scripted_reports(rep))
+    r = scout("Is Sinner in better form than Alcaraz?", graph=g)
+    assert r["nudges"] == 1
+    assert "predict_match" in [t["tool"] for t in r["tool_outputs"]]
+    assert r["status"] == "verified"
+
+
+def test_nudges_are_capped():
+    script = [AIMessage(content="done")] * 5   # never calls any tool
+    g = build_graph(llm=ScriptedChat(script=list(script)), report_llm=scripted_reports(report()))
+    r = scout("Sinner vs Alcaraz?", graph=g)
+    assert r["nudges"] == 2 and r["status"] == "unverified"

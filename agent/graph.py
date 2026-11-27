@@ -2,6 +2,7 @@ r"""
 LangGraph scouting agent.
 
     START -> agent --(tool calls)--> tools --> agent      (research loop)
+               |--(done, no prediction yet)--> nudge --> agent   (required-tool guard, <=2)
                \--(done)--> write_report --> verify
                                  ^              |
                                  \--(fail, <3)--/        (grounding retry loop)
@@ -33,6 +34,7 @@ from .tools import TOOLS
 
 MAX_REPORT_ATTEMPTS = 3
 MAX_TOOL_ROUNDS = 6
+MAX_NUDGES = 2  # times the graph sends the agent back for a required tool it skipped
 
 AGENT_PROMPT = """You are a tennis scouting analyst for the US Open (men's singles: hard court, best of five sets).
 Gather evidence with the tools before answering:
@@ -68,6 +70,7 @@ class ScoutState(TypedDict, total=False):
     verification: Optional[dict]
     attempts: int
     feedback: Optional[str]
+    nudges: int
     status: str
 
 
@@ -134,11 +137,27 @@ def build_graph(llm=None, report_llm=None):
         return {"messages": msgs, "tool_outputs": outputs,
                 "tool_rounds": state.get("tool_rounds", 0) + 1}
 
+    def has_prediction(state: ScoutState) -> bool:
+        return any(t["tool"] == "predict_match" and "winner" in t["output"]
+                   for t in state.get("tool_outputs", []))
+
     def route_after_agent(state: ScoutState) -> str:
         last = state["messages"][-1]
         if getattr(last, "tool_calls", None) and state.get("tool_rounds", 0) < MAX_TOOL_ROUNDS:
             return "tools"
+        # The agent wants to stop. Enforce the one required tool in code rather than
+        # trusting the prompt: small models sometimes skip predict_match on "form" or
+        # "serve" questions, which leaves the report unverifiable.
+        if not has_prediction(state) and state.get("nudges", 0) < MAX_NUDGES:
+            return "nudge"
         return "write_report"
+
+    def nudge(state: ScoutState) -> dict:
+        return {"messages": [HumanMessage(
+            "You have not called predict_match yet. Every answer must include the model's "
+            "prediction: call predict_match for the two players in the question now "
+            "(use search_players first if you are unsure of the exact names).")],
+                "nudges": state.get("nudges", 0) + 1}
 
     def write_report(state: ScoutState) -> dict:
         prompt = REPORT_PROMPT.format(question=state["question"],
@@ -175,11 +194,14 @@ def build_graph(llm=None, report_llm=None):
     g = StateGraph(ScoutState)
     g.add_node("agent", agent)
     g.add_node("tools", tools)
+    g.add_node("nudge", nudge)
     g.add_node("write_report", write_report)
     g.add_node("verify", verify_node)
     g.add_edge(START, "agent")
-    g.add_conditional_edges("agent", route_after_agent, {"tools": "tools", "write_report": "write_report"})
+    g.add_conditional_edges("agent", route_after_agent,
+                            {"tools": "tools", "nudge": "nudge", "write_report": "write_report"})
     g.add_edge("tools", "agent")
+    g.add_edge("nudge", "agent")
     g.add_edge("write_report", "verify")
     g.add_conditional_edges("verify", route_after_verify, {"write_report": "write_report", END: END})
     return g.compile()
@@ -190,7 +212,7 @@ def scout(question: str, graph=None) -> dict:
     graph = graph or build_graph()
     t0 = time.perf_counter()
     final = graph.invoke({"question": question, "messages": [HumanMessage(question)],
-                          "tool_outputs": [], "usage": [], "attempts": 0},
+                          "tool_outputs": [], "usage": [], "attempts": 0, "nudges": 0},
                          config={"recursion_limit": 40})
     final["latency_s"] = round(time.perf_counter() - t0, 2)
     return final
