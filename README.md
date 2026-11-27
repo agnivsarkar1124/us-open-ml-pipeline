@@ -131,12 +131,12 @@ python -m agent "cobolli vs hurkacz at flushing meadows, who's the pick?"
 
   | Metric | Result |
   |---|---|
-  | Fully verified reports | **90%** (84% on first attempt; retries recovered 3) |
-  | Correct players identified | **96%**, including misspelled names |
-  | Untraceable numbers in final answers | **0.9%** (6 of 680) |
+  | Fully verified reports | **94%** (86% on first attempt; retries recovered 4) |
+  | Correct players identified | **100%**, including misspelled names |
+  | Untraceable numbers in final answers | **0.6%** (4 of 654) |
   | Mean latency per question | 36 s on a laptop |
 
-  Every category scored 90–100% except "form" questions (2/5 verified), the next area to improve. Full results: [`eval/agent_results.json`](eval/agent_results.json).
+  Every category scored 93–100% except "form" questions (3/5 verified), the next area to improve. Enforcing the prediction tool in code (the nudge step) raised correct-player identification from 96% to 100% and verified reports from 90% to 94% versus the previous run (single runs; LLM output varies between runs). Full results: [`eval/agent_results.json`](eval/agent_results.json).
 * **Tested in CI:** 19 tests run on every push with a scripted model and a mocked API, so they need no API key.
 
 ---
